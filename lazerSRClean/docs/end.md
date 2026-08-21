@@ -23,7 +23,23 @@ git push origin v{version}
 gh run list --repo shinsh628/LazerSR --workflow=build-installer.yml --limit 3
 ```
 
-버전 번호만 바꿔 수동으로 다시 돌리고 싶으면(태그 없이) `workflow_dispatch`로도 실행 가능 — GitHub Actions 탭에서 "Run workflow" + 버전 입력, 또는 `gh workflow run build-installer.yml -f version=6.4.1`. 이 경로는 release를 만들지 않고 아티팩트만 나온다(위 5번 조건 참고).
+버전 번호만 바꿔 수동으로 다시 돌리고 싶으면(태그 없이) `workflow_dispatch`로도 실행 가능 — GitHub Actions 탭에서 "Run workflow" + 버전 입력, 또는 `gh workflow run build-installer.yml -f version=6.4.1`. 기본값(`create_release` 체크 해제)에서는 release를 만들지 않고 아티팩트만 나온다.
+
+### 1c. 로컬 git이 없을 때 — `workflow_dispatch` + `create_release`
+
+**태그를 직접 push할 수 없는 상황**(다른 PC의 웹 세션, 태그 push 권한이 없는 자동화 등)에서 쓴다.
+"Run workflow"에서 버전을 넣고 **`create_release`를 체크**하면 된다.
+
+```powershell
+gh workflow run build-installer.yml -f version=6.5.3 -f create_release=true --ref <브랜치>
+```
+
+`gh release create`는 **태그가 없으면 `--target` 커밋에 서버에서 직접 만들어 준다.** 워크플로의
+`GITHUB_TOKEN`이 `contents: write`를 갖고 있어 가능한 경로다. 태그는 **그 실행이 체크아웃한 커밋**에
+붙으므로, `--ref`로 어느 브랜치를 돌렸는지가 곧 릴리즈 대상이다.
+
+> **주의**: GitHub 웹 UI의 "Draft a new release"로 태그를 만들지 말 것. 릴리즈가 먼저 생기면
+> 태그 push 이벤트로 돌아온 워크플로의 `gh release create`가 중복으로 실패해 **exe가 첨부되지 않는다.**
 
 **주의**: `installer\LazerSRClean.iss`의 `AppId`는 절대 바꾸지 않는다 (업그레이드 인식용, 최초 LazerSR과 동일 유지). `[Files]` 목록에 새 의존 DLL을 추가했다면(`architecture.md` §8) `.iss`의 `[Files]` 섹션도 같이 갱신하고 커밋할 것 — 이건 워크플로가 대신 해주지 않는다.
 
