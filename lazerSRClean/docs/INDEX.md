@@ -45,7 +45,7 @@
 | `LazerSR.Hook\Patches\` | HarmonyX 패치 클래스들 — 목록은 `architecture.md` §4 | 관리대상 |
 | `LazerSR.Hook\Calculators\` | sunnySR/MSD/Dan/replay-timeline/결과창 구간 분석(`ManiaSectionAnalysis`) 등 계산 로직 | 관리대상 |
 | `LazerSR.Hook\Screens\` | 무한 트레이닝 화면/시드 비트맵 + 결과창 구간 연습(`SectionPractice*`) + **패턴 복제 화면/시드 비트맵(`PatternCopy*`)** — 전부 `OsuScreen`/`Player`/`WorkingBeatmap` 파생. 로컬 전용 로더 마커 `ILocalOnlyPlayerLoader` 포함 | 관리대상 |
-| `LazerSR.Hook\PatternCopy\` | **패턴 복제 모드** — 외부 프로그램(newScreen)이 파이프로 보내온 노트를 실시간 주입. 명령 큐(`PatternCopyBridge`)·주입기·**롱노트 런타임 절단**(`HoldNoteTruncator`)·세션 상태. `architecture.md` §19 | **관리대상** (2026-08-21 신규) |
+| `LazerSR.Hook\PatternCopy\` | **패턴 복제 모드** — 외부 프로그램(newScreen)이 파이프로 보내온 노트를 실시간 주입. 명령 큐(`PatternCopyBridge`)·주입기·**롱노트 런타임 절단**(`HoldNoteTruncator`)·세션 상태 + **비포커스 프레임 유지**(`InactiveFrameRateOverride`). `architecture.md` §19 | **관리대상** (2026-08-21 신규) |
 | `LazerSR.Hook\Input\` | 비포커스 상태에서 하드웨어 키를 받아 프레임워크 입력 큐에 넣는 릴레이(Raw Input `RIDEV_INPUTSINK`). **패턴 복제 모드 전용이며 그 화면의 수명에 묶여 있다** — `safety.md` 참고 | **관리대상** (2026-08-21 신규) |
 | `LazerSR.Hook\Training\` | 무한 트레이닝 — 패턴 생성 파이프라인(생성기/마디 큐/주입기), 단기 실력찾기(`ShortTermSearch`), 정확도 집계, 프로필, 배경음(`MusicLibrary`/`TrainingMusicPlayer`/`TrainingMusicStore`/`BeatmapMusicAnalysis`), 무한 세션(`InfiniteSession`). 격자 절대규칙은 `TrainingGrid`, 패턴 정의·상수는 `PatternCatalog` | **관리대상** |
 | `LazerSR.Hook\Training\Patterns\` | 세부패턴별 생성 규칙 (`IPatternGenerator` 구현체) + 공용 추첨 도구 `PatternPicker` | 관리대상 |

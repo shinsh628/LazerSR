@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using LazerSR.Hook.Input;
 using LazerSR.Hook.PatternCopy;
 using osu.Framework.Allocation;
+using osu.Framework.Configuration;
 using osu.Framework.Platform;
 using osu.Framework.Screens;
 using osu.Game.Scoring;
@@ -37,9 +38,16 @@ public partial class PatternCopyPlayer : Player
     [Cached(typeof(IGameplayLeaderboardProvider))]
     private readonly EmptyGameplayLeaderboardProvider leaderboardProvider = new EmptyGameplayLeaderboardProvider();
 
-    /// <summary>입력 릴레이 등록에 필요하다 (<see cref="RawKeyRelay"/>).</summary>
+    /// <summary>
+    /// 입력 릴레이 등록(<see cref="RawKeyRelay"/>)과 비활성 프레임 상한 조정
+    /// (<see cref="InactiveFrameRateOverride"/>)에 필요하다.
+    /// </summary>
     [Resolved]
     private GameHost host { get; set; } = null!;
+
+    /// <summary>현재 <c>FrameSync</c> 모드를 읽는 데 쓴다 (<see cref="InactiveFrameRateOverride"/>).</summary>
+    [Resolved]
+    private FrameworkConfigManager frameworkConfig { get; set; } = null!;
 
     /// <summary>newScreen이 보내온 노트를 실제로 놓는다. 비트맵 로드 이후에만 만들 수 있다.</summary>
     private PatternCopyInjector? injector;
@@ -94,14 +102,13 @@ public partial class PatternCopyPlayer : Player
     protected override Task ImportScore(Score score) => Task.CompletedTask;
 
     /// <summary>
-    /// 포커스가 없어도 키 입력을 받게 한다 — 이 모드에서는 대상 게임이 포커스를 쥐고 있다.
+    /// 포커스가 없어도 키 입력을 받게 하고(<see cref="RawKeyRelay"/>), 포커스를 잃어도 프레임이
+    /// 떨어지지 않게 한다(<see cref="InactiveFrameRateOverride"/>). 이 모드에서는 대상 게임이
+    /// 포커스를 쥐고 osu! 화면은 WGC로 캡처해 보므로 둘 다 필요하다.
     /// <para>
-    /// <b>프레임 관련 설정은 건드리지 않는다.</b> 한때 비활성 창 프레임 저하를 막으려고
-    /// <c>GameHost.MaximumInactiveHz</c>를 올렸는데, 그 값은 "저하 기능의 스위치"가 아니라
-    /// <b>비활성일 때의 상한값 자체</b>라서 상한이 통째로 사라졌다. VSync를 쓰면
-    /// <c>MaximumDrawHz</c>도 <c>int.MaxValue</c>(제한은 vsync가 담당)인데 가려진 창은 vsync에
-    /// 물리지 않아, 결국 아무것도 제한하지 않는 루프가 되어 프레임이 폭주하다 렉으로 끊기길 반복했다.
-    /// 실측상 비포커스에서도 프레임이 떨어지지 않으므로 애초에 막을 문제가 없었다.
+    /// 프레임 쪽은 2026-08-21에 <c>GameHost.MaximumInactiveHz</c>를 무작정 올렸다가 되돌린 적이 있다.
+    /// 그때의 실패 원인은 접근이 아니라 <b>넣은 값</b>이었다 — 자세한 건
+    /// <see cref="InactiveFrameRateOverride"/>의 주석을 볼 것.
     /// </para>
     /// </summary>
     public override void OnEntering(ScreenTransitionEvent e)
@@ -109,6 +116,7 @@ public partial class PatternCopyPlayer : Player
         base.OnEntering(e);
 
         RawKeyRelay.Start(host);
+        InactiveFrameRateOverride.Start(host, frameworkConfig);
 
         // 화면이 떠 있는 동안에만 명령을 받는다 — 아니면 다음 진입 때 과거 노트가 쏟아진다.
         PatternCopyBridge.Clear();
@@ -120,6 +128,7 @@ public partial class PatternCopyPlayer : Player
         PatternCopyBridge.Active = false;
         PatternCopyBridge.Clear();
         RawKeyRelay.Stop();
+        InactiveFrameRateOverride.Stop();
 
         return base.OnExiting(e);
     }

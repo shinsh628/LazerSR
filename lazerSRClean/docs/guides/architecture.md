@@ -685,6 +685,7 @@ newScreen (화면 캡처 → 노트 감지) ──Named Pipe──> PatternCopyB
 | `PatternCopy/PatternCopyInjector.cs` | 시각 원점 관리 + `Playfield.Add` + 열린 롱노트 추적 |
 | `PatternCopy/HoldNoteTruncator.cs` | 주입된 롱노트를 게임플레이 도중 잘라낸다 (아래 참고) |
 | `PatternCopy/PatternCopySessionState.cs` | 캡처 세션 경계 통지 (`SessionIndex`) |
+| `PatternCopy/InactiveFrameRateOverride.cs` | 포커스를 잃어도 포커스 시와 같은 프레임을 유지 (아래 참고) |
 | `Input/RawKeyRelay.cs` | 비포커스 상태에서도 키 입력을 받게 한다 (아래 참고) |
 | `Widgets/PatternCopyStatusWidget.cs` | 콤보/정확도 표시. 세션이 바뀌면 리셋 |
 
@@ -741,10 +742,51 @@ pc:stop                              캡처 종료 (열린 롱노트 정리)
   두 번 들어간다. 또 그 전환 시점에 **눌러둔 키를 전부 떼어줘야** 한다(안 그러면 영원히 눌린 키가 남는다).
 - 합성 입력(`SendInput` 등)은 쓰지 않는다 — 사용자가 실제로 누른 키를 전달만 한다.
 
-### 시도했다가 되돌린 것 — 비활성 창 프레임 제한
+### 비포커스 프레임 유지 (`InactiveFrameRateOverride`, 2026-08-21 재작업)
 
-`GameHost.MaximumInactiveHz`를 올려 비포커스 프레임 저하를 막으려 했으나 **역효과였다.**
-그 값은 "저하 기능의 스위치"가 아니라 **비활성일 때의 상한값 자체**라, 올리면 상한이 사라진다.
-VSync를 쓰면 `MaximumDrawHz`도 `int.MaxValue`(제한은 vsync가 담당)인데 **가려진 창은 vsync에
-물리지 않아**, 결국 아무것도 제한하지 않는 루프가 되어 프레임이 폭주하다 렉으로 끊기길 반복했다.
-실측상 비포커스에서도 프레임이 떨어지지 않으므로 **애초에 막을 문제가 없었다.**
+osu! 화면을 WGC로 캡처해 오버레이로 보는 모드라 **비포커스 프레임이 곧 캡처 품질**이다.
+프레임워크는 포커스를 잃으면 업데이트·드로우 스레드를 `GameThread.DEFAULT_INACTIVE_HZ`(60)로 묶는다.
+
+스로틀의 전부는 이것 하나다 —
+
+```csharp
+// GameThread.updateMaximumHz()
+Scheduler.Add(() => Clock.MaximumUpdateHz = IsActive.Value ? activeHz : inactiveHz);
+```
+
+따라서 **모드가 도는 동안만 `InactiveHz`를 포커스 시 값으로 올리고 나갈 때 되돌리면** 된다.
+패치도 리플렉션도 필요 없다 — osu! 본체 `LatencyCertifierScreen`이 `ActiveHz`에 대해 같은
+저장/덮기/복원을 한다. 수명은 `RawKeyRelay`와 같이 `PatternCopyPlayer.OnEntering`/`OnExiting`이다.
+
+**⚠️ `MaximumDrawHz`를 그대로 복사하면 안 된다 — 이게 2026-08-21 첫 시도가 실패한 이유다.**
+`updateFrameSyncMode()`는 VSync에서 `drawLimiter = int.MaxValue`로 두고 실제 제한을 vsync에 위임하며,
+그 값이 `maximum_sane_fps`(= `GameThread.DEFAULT_ACTIVE_HZ` = 1000)로 클램프된다. 즉 VSync·Unlimited에서
+`MaximumDrawHz`는 **1000이고 이건 체감 프레임이 아니다** — 144Hz에서 144가 나오는 건 숫자가 아니라
+vsync가 present를 막기 때문이다. 그런데 **가려진 창은 vsync에 물리지 않아** 비포커스에는 그 제한자가
+통째로 사라진다. 그래서 1000을 옮기면 갱신률의 몇 배로 과렌더하다 렉으로 끊긴다.
+
+| FrameSync | 포커스 시 실효 draw | `DrawThread.InactiveHz`에 넣는 값 |
+|---|---|---|
+| VSync (osu! 기본) | 갱신률 (vsync가 제한) | `Window.CurrentDisplayMode.Value.RefreshRate` |
+| Limit2x / 4x / 8x | `MaximumDrawHz` (유한, vsync off) | 그대로 |
+| Unlimited | 1000 | 갱신률 — 그 위는 **대상 게임의 GPU를 뺏을 뿐** |
+
+업데이트 스레드는 `MaximumUpdateHz`를 **그대로 복사한다**. 항상 `maximum_sane_fps`로 클램프돼 유한하고,
+판정이 이 스레드에서 도니 포커스 때보다 낮추면 그 자체가 손해다.
+
+**세팅 순서가 있다.** `GameHost.MaximumInactiveHz`는 update/draw에 **같은 값**을 꽂으면서 `ThreadRunner`에도
+넘기는데, 단일스레드 `ExecutionMode`에서는 그 `ThreadRunner` 값이 모든 스레드를 지배한다(per-thread만
+세팅하면 그 모드에서 무효). 그래서 **`MaximumInactiveHz` 먼저 → per-thread `InactiveHz`로 좁히기** 순서다.
+반대로 하면 per-thread 값이 덮인다.
+
+> **과거 기록 정정**: 이 기능은 한 번 "실측상 비포커스에서도 프레임이 안 떨어지므로 막을 문제가 없다"고
+> 결론 내고 되돌린 적이 있다. **그 판단은 틀렸다** — 당시 개발 PC가 60Hz라 `DEFAULT_INACTIVE_HZ`(60)와
+> 차이가 안 났을 뿐이다. 고주사율 환경에서는 그대로 드러난다.
+
+### 여전히 이걸로 못 고치는 것
+
+대상 게임이 **전체화면 독점(exclusive fullscreen)**이면 DWM 합성 경로가 빠져 osu!의 present 자체가
+진행되지 않는다. 이건 프레임워크 밖의 문제라 위 조정으로 해결되지 않는다 — 대상 게임을 borderless로
+돌리거나, osu! 창을 완전히 가리지 않게 두거나, 보조 모니터로 빼야 한다.
+**증상 분리법**: 포커스만 뺏고 osu! 창은 보이게 둔 채 FPS를 본다. 딱 60이면 위 스로틀이 원인이고,
+그보다 낮거나 불규칙하면 오클루전이 섞인 것이다.
