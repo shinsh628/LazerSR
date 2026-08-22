@@ -34,7 +34,7 @@ namespace LazerSR.Hook.Widgets;
 /// Song-select-only widget for the personal sunny+ diff. Two rows.
 /// <para>
 /// <b>위(pill)</b>: 좌측은 지금 스코프된 맵의 <i>개인화</i> sunnySR(만인 + 개인 diff),
-/// 우측은 이 사람이 정확도 96%를 뽑아내는 sunny 값 — 큐에 쌓인 기록으로 적합한 α/β의 역산일 뿐,
+/// 우측은 이 사람이 정확도 95%를 뽑아내는 sunny 값 — 큐에 쌓인 기록으로 적합한 α/β의 역산일 뿐,
 /// 맵과 무관한 "실력" 숫자다.
 /// </para>
 /// <para>
@@ -101,7 +101,7 @@ public partial class PersonalSunnyWidget : CompositeDrawable, ISerialisableDrawa
     private ModSettingChangeTracker? modTracker;
     private int lastServiceVersion = -1;
 
-    private const double target_accuracy = 0.96;
+    private const double target_accuracy = 0.95;
 
     public PersonalSunnyWidget()
     {
@@ -249,6 +249,11 @@ public partial class PersonalSunnyWidget : CompositeDrawable, ISerialisableDrawa
         if (beatmapManager != null && rulesetStore != null)
             PersonalSunnyService.EnsureDependencies(beatmapManager, rulesetStore);
 
+        // Proactive one-shot pre-computation - idempotent, so this widget loading again on another
+        // screen (or a fresh song-select visit) is a harmless no-op after the first time.
+        if (realmAccess != null && api != null)
+            PersonalSunnyService.StartBackgroundWarmup(realmAccess, api);
+
         ruleset?.BindValueChanged(_ => scheduleRecalculate());
         beatmap?.BindValueChanged(_ => scheduleRecalculate());
 
@@ -331,7 +336,7 @@ public partial class PersonalSunnyWidget : CompositeDrawable, ISerialisableDrawa
         }, ct);
     }
 
-    // ── 우측 pill: 정확도 96%를 뽑아내는 sunny 값 ─────────────────────────────
+    // ── 우측 pill: 정확도 95%를 뽑아내는 sunny 값 ─────────────────────────────
 
     private void refreshTargetPill()
     {
@@ -371,7 +376,13 @@ public partial class PersonalSunnyWidget : CompositeDrawable, ISerialisableDrawa
         }
         else
         {
-            queueLabel.Text = $"{PersonalSunnyService.QueueCount}/{PersonalSunnyQueueStore.MaxEntries}";
+            // 풀별로 "그 풀 자체 상한 대비 분수"를 보여준다(2026-08-22) - Pool A("최고")는 정원
+            // PersonalSunnyTopPoolStore.Capacity, Pool B("최근")는 fit에 실제 반영되는 상한
+            // RecentPoolEffectiveCount(원본 100개 윈도우가 아니라 그중 축소된 50) 대비. 총합 하나로
+            // 합치면 두 풀의 성격이 다른 게 안 드러나고, raw+반영 혼합 표기는 숫자 자체가 의미가
+            // 없어져서(예: Pool B 원본이 늘어도 개인화엔 영향 없는데 총합만 커짐) 이 분수 표기로 확정.
+            queueLabel.Text = $"최고 {PersonalSunnyService.TopPoolRecordCount}/{PersonalSunnyTopPoolStore.Capacity} · " +
+                               $"최근 {PersonalSunnyService.RecentPoolRecordCount}/{PersonalSunnyService.RecentPoolEffectiveCount}";
         }
     }
 
@@ -386,7 +397,7 @@ public partial class PersonalSunnyWidget : CompositeDrawable, ISerialisableDrawa
         {
             try
             {
-                PersonalSunnyService.CollectFromRealmAsync(realmAccess, api);
+                PersonalSunnyService.ResetAndCollectFromRealmAsync(realmAccess, api);
             }
             catch (Exception e)
             {
