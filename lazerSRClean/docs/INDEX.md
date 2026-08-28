@@ -49,7 +49,7 @@
 | `LazerSR.Hook\Input\` | 비포커스 상태에서 하드웨어 키를 받아 프레임워크 입력 큐에 넣는 릴레이(Raw Input `RIDEV_INPUTSINK`). **패턴 복제 모드 전용이며 그 화면의 수명에 묶여 있다** — `safety.md` 참고 | **관리대상** (2026-08-21 신규) |
 | `LazerSR.Hook\Training\` | 무한 트레이닝 — 패턴 생성 파이프라인(생성기/마디 큐/주입기), 단기 실력찾기(`ShortTermSearch`), 정확도 집계, 프로필, 배경음(`MusicLibrary`/`TrainingMusicPlayer`/`TrainingMusicStore`/`BeatmapMusicAnalysis`), 무한 세션(`InfiniteSession`). 격자 절대규칙은 `TrainingGrid`, 패턴 정의·상수는 `PatternCatalog` | **관리대상** |
 | `LazerSR.Hook\Training\Patterns\` | 세부패턴별 생성 규칙 (`IPatternGenerator` 구현체) + 공용 추첨 도구 `PatternPicker` | 관리대상 |
-| `LazerSR.Hook\Widgets\` | `ISerialisableDrawable` 스킨 위젯 구현체. 키뷰어(`KeyViewerWidget`/`KeyViewerKey`)와 `BoxElementPlus`는 osu! 본체 위젯을 상속한 것 — `architecture.md` §10/§11 | 관리대상 |
+| `LazerSR.Hook\Widgets\` | `ISerialisableDrawable` 스킨 위젯 구현체. 키뷰어(`KeyViewerWidget`/`KeyViewerKey`)와 `BoxElementPlus`는 osu! 본체 위젯을 상속한 것 — `architecture.md` §10/§11. 실시간 sunny(`RealtimeSunnyWidget`, 앞 400ms 구간 난이도, §20) | 관리대상 |
 | `LazerSR.Hook\Drawables\` | 커스텀 drawable — StrainAreaGraph, MsdBarChart, ManiaJudgementLineOverlay/ManiaPressOverlay/ManiaJudgementSimulation(리플레이 판정 표시, `architecture.md` §9), ManiaJudgementScatterGraph(결과창 판정 산점도 + 구간 선택·연습, §12) | 관리대상 |
 | `LazerSR.Hook\Data\` | 불변 record 데이터 타입 + 화면 간 전달용 상태 슬롯(`ManiaSimulationState`, `ManiaOverlayVisibility` 등) | 관리대상 |
 | `LazerSR.Hook\PersonalSunny\` | 개인화 diff 파이프라인 — 큐/J캐시/적합결과 저장소, 모드 화이트리스트, `PersonalSunnyService`(굽기+적합 오케스트레이터), `Player.ImportScore` 자동 수집 패치. `architecture.md` §17 | **관리대상** (2026-08-19 신규) |

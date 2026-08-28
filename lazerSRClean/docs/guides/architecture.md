@@ -855,3 +855,26 @@ vsync가 present를 막기 때문이다. 그런데 **가려진 창은 vsync에 �
 돌리거나, osu! 창을 완전히 가리지 않게 두거나, 보조 모니터로 빼야 한다.
 **증상 분리법**: 포커스만 뺏고 osu! 창은 보이게 둔 채 FPS를 본다. 딱 60이면 위 스로틀이 원인이고,
 그보다 낮거나 불규칙하면 오클루전이 섞인 것이다.
+
+---
+
+## 20. 실시간 sunny 위젯 (`RealtimeSunnyWidget`, 2026-08-29 신규)
+
+게임플레이 HUD 스킨 위젯. 기본 sunny pill(`StarRatingDisplay`)과 생김새가 같고, 맵 전체가 아니라
+**앞으로 400ms 구간의 난이도**를 100ms마다 갱신해 보여준다.
+
+- **사전계산**: 로딩 중 BDL의 `Task.Run`에서 `SunnyManiaDifficultyCalculator.GetStrainTimeline`을 한 번
+  돌려 노트별 `(시각, strain)`를 통째로 들고 있는다. 이후 매 틱은 배열 조회만 한다(무거운 계산 없음).
+- **매 틱**: `gameplayClock.CurrentTime`부터 `min(+400ms, 맵 끝)` 윈도우 안의 **모든 노트 strain 산술평균**
+  = raw. 윈도우 폭은 배속과 무관한 고정 400ms(비트맵 시간). 동시치기는 sunny 원본처럼 값이 개수만큼
+  중복 들어간다. 윈도우에 노트가 없으면 0. (상위 N개만 뽑던 초기안은 로컬 피크만 반영돼 맵 전체
+  sunny보다 값이 과하게 높아서 산술평균으로 교체했다.)
+- **합산**: 실시간이라 상위/중위 퍼센타일·파워민을 쓰지 않는다. `raw`를 §합산 파이프라인의 **짧은 맵
+  보정 이후부터** 통과시킨다 — `SunnyTempNerf.Apply(raw) × 0.975`. (고SR 리스케일은 원본에서 이미 비활성.)
+- sunny/sunny+ 구분은 여기서 안 한다 — 런처 체크박스가 프로세스 전역 기본값을 정하고 `GetStrainTimeline`이
+  다른 소비처처럼 그 값을 읽는다. **개인화 diff는 위젯 설정 토글(`UsePersonalSunny`)로 opt-in** — 켜면
+  베이크가 `SunnyConstants.WithIsolatedDiff(PersonalDiff.CombinedWithUniversal(), …)` 안에서 돈다
+  (`StrainGraphWidget` 개인화 오버레이와 동일). 토글을 바꾸면 타임라인을 다시 베이크한다.
+- **표시**: `pill.Current.Value`에 새 값을 넣기만 한다. `StarRatingDisplay(animated: true)`가
+  `100 + 80·|Δ|`ms 트윈으로 직전 표시값→새 값을 추종하고 색도 그 트윈값을 따라가므로 0으로 튀지 않는다.
+- 서버 레드라인 무관: 읽기 전용, 라이브 인스턴스 미접근, 네트워크·파일 쓰기 없음.
