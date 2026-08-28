@@ -21,12 +21,34 @@ internal sealed class RawKeyboardListener : IDisposable
     /// <summary>키 상태 변화. <b>전용 메시지 스레드에서 호출된다</b> — 수신 측이 스레드 안전해야 한다.</summary>
     public event Action<Key, bool>? KeyChanged;
 
+    /// <summary>
+    /// 윈도우 클래스에 박히는 함수 포인터의 주인. <b>절대 인스턴스 필드로 두면 안 된다.</b>
+    /// <para>
+    /// Win32 윈도우 클래스는 <c>RegisterClassEx</c> 시점의 함수 포인터를 <b>값으로 복사해 보관</b>하고
+    /// <c>UnregisterClass</c> 전까지 프로세스 수명 내내 남는다. 그런데
+    /// <c>Marshal.GetFunctionPointerForDelegate</c>가 만든 스텁은 GC가 추적하지 않으므로,
+    /// 델리게이트를 세션 수명(인스턴스 필드)에 묶으면 세션이 끝난 뒤 수거되면서
+    /// <b>클래스에는 해제된 메모리를 가리키는 포인터만 남는다.</b>
+    /// 그 상태로 두 번째 세션이 같은 클래스로 창을 만들면 <c>CreateWindowEx</c>가 반환 전에 보내는
+    /// <c>WM_NCCREATE</c>부터 죽은 포인터로 점프해 <b>액세스 위반으로 프로세스가 즉사</b>한다
+    /// (2026-08-21 재진입 크래시의 원인).
+    /// </para>
+    /// <para>
+    /// 그래서 클래스의 수명(프로세스)에 델리게이트의 수명을 맞춘다. 프로시저가 하나로 공유되므로
+    /// 실제 수신 대상은 <see cref="current"/>로 갈아끼운다.
+    /// </para>
+    /// </summary>
+    private static readonly WndProc shared_wnd_proc = staticWndProc;
+
+    private static readonly object class_lock = new();
+    private static bool classRegistered;
+
+    /// <summary>지금 메시지를 받을 리스너. 창은 세션마다 새로 만들지만 프로시저는 하나뿐이다.</summary>
+    private static volatile RawKeyboardListener? current;
+
     private Thread? thread;
     private IntPtr hwnd;
     private uint threadId;
-
-    // 델리게이트가 GC되면 네이티브 쪽에서 죽은 포인터를 호출한다 — 반드시 필드로 붙잡아 둔다.
-    private WndProc? wndProcHolder;
 
     private readonly ManualResetEventSlim ready = new(false);
     private volatile bool disposed;
@@ -69,37 +91,91 @@ internal sealed class RawKeyboardListener : IDisposable
         }
         finally
         {
-            ready.Set();
-            cleanup();
+            // 백그라운드 스레드 진입점 밖으로 예외가 나가면 .NET은 프로세스를 즉시 종료한다.
+            // 여기서 새는 경로가 실제로 하나 있었다 — Dispose()가 Join 타임아웃 뒤 ready를 버리면
+            // 이 Set()이 던졌다. 지금은 Dispose가 ready를 버리지 않지만, 방어는 남겨둔다.
+            try
+            {
+                ready.Set();
+                cleanup();
+            }
+            catch (Exception ex)
+            {
+                HookLog.Write($"[LazerSR] RawKeyboardListener cleanup failed: {ex}");
+            }
         }
     }
 
     private const string window_class = "LazerSRRawInputSink";
 
+    /// <summary>
+    /// 클래스 등록은 <b>프로세스당 한 번</b>이다 (<see cref="shared_wnd_proc"/> 주석 참고).
+    /// </summary>
+    private static bool ensureClassRegistered()
+    {
+        lock (class_lock)
+        {
+            if (classRegistered)
+                return true;
+
+            var wc = new WNDCLASSEX
+            {
+                cbSize = Marshal.SizeOf<WNDCLASSEX>(),
+                lpfnWndProc = Marshal.GetFunctionPointerForDelegate(shared_wnd_proc),
+                hInstance = GetModuleHandle(null),
+                lpszClassName = window_class,
+            };
+
+            if (RegisterClassEx(ref wc) != 0)
+            {
+                classRegistered = true;
+                return true;
+            }
+
+            int error = Marshal.GetLastWin32Error();
+
+            // 이 이름은 우리만 쓰므로 보통 나지 않는다. 그래도 이미 있다면 그 클래스의 프로시저 역시
+            // 프로세스 수명으로 붙잡혀 있는 우리 것이므로(이 메서드 말고는 등록하는 곳이 없다) 그대로 쓴다.
+            if (error == ERROR_CLASS_ALREADY_EXISTS)
+            {
+                classRegistered = true;
+                return true;
+            }
+
+            HookLog.Write($"[LazerSR] RawKeyboardListener: RegisterClassEx failed ({error}).");
+            return false;
+        }
+    }
+
     private bool createMessageWindow()
     {
         threadId = GetCurrentThreadId();
-        wndProcHolder = wndProc;
 
-        IntPtr module = GetModuleHandle(null);
+        if (!ensureClassRegistered())
+            return false;
 
-        var wc = new WNDCLASSEX
-        {
-            cbSize = Marshal.SizeOf<WNDCLASSEX>(),
-            lpfnWndProc = Marshal.GetFunctionPointerForDelegate(wndProcHolder),
-            hInstance = module,
-            lpszClassName = window_class,
-        };
+        // 프로시저가 공유이므로 창을 만들기 전에 수신 대상을 우리로 바꿔둔다 —
+        // CreateWindowEx는 반환 전에 WM_NCCREATE/WM_CREATE를 동기로 보낸다.
+        current = this;
 
-        // 이미 등록돼 있으면(재진입) 실패하지만 CreateWindowEx는 정상 동작하므로 무시한다.
-        RegisterClassEx(ref wc);
-
-        hwnd = CreateWindowEx(0, window_class, string.Empty, 0, 0, 0, 0, 0, HWND_MESSAGE, IntPtr.Zero, module, IntPtr.Zero);
+        hwnd = CreateWindowEx(0, window_class, string.Empty, 0, 0, 0, 0, 0, HWND_MESSAGE, IntPtr.Zero, GetModuleHandle(null), IntPtr.Zero);
 
         if (hwnd == IntPtr.Zero)
+        {
             HookLog.Write($"[LazerSR] RawKeyboardListener: CreateWindowEx failed ({Marshal.GetLastWin32Error()}).");
+            releaseTarget(this);
+        }
 
         return hwnd != IntPtr.Zero;
+    }
+
+    private static void releaseTarget(RawKeyboardListener listener)
+    {
+        lock (class_lock)
+        {
+            if (ReferenceEquals(current, listener))
+                current = null;
+        }
     }
 
     private bool registerDevice()
@@ -119,13 +195,20 @@ internal sealed class RawKeyboardListener : IDisposable
         return false;
     }
 
-    private IntPtr wndProc(IntPtr h, uint msg, IntPtr wParam, IntPtr lParam)
+    /// <summary>
+    /// <b>네이티브에서 직접 불린다 — 어떤 예외도 밖으로 나가면 안 된다.</b>
+    /// 세션마다 새로 만들지 않고 하나를 계속 쓰므로, 실제 처리는 지금 대상인 리스너에게 넘긴다.
+    /// </summary>
+    private static IntPtr staticWndProc(IntPtr h, uint msg, IntPtr wParam, IntPtr lParam)
     {
         if (msg == WM_INPUT)
         {
             try
             {
-                handleRawInput(lParam);
+                var listener = current;
+
+                if (listener != null && !listener.disposed)
+                    listener.handleRawInput(lParam);
             }
             catch (Exception ex)
             {
@@ -178,7 +261,8 @@ internal sealed class RawKeyboardListener : IDisposable
             hwnd = IntPtr.Zero;
         }
 
-        wndProcHolder = null;
+        // 클래스와 프로시저는 프로세스 수명이라 해제하지 않는다 — 수신 대상만 놓는다.
+        releaseTarget(this);
     }
 
     public void Dispose()
@@ -188,13 +272,20 @@ internal sealed class RawKeyboardListener : IDisposable
         disposed = true;
         KeyChanged = null;
 
+        // 창을 실제로 부수는 건 메시지 스레드의 cleanup()이지만, Join이 타임아웃할 수 있으므로
+        // 수신 대상은 여기서 먼저 놓는다 — 그래야 그 사이에 온 WM_INPUT이 버려진다.
+        releaseTarget(this);
+
         // 메시지 루프를 깨워서 스스로 빠져나가게 한다.
         if (threadId != 0)
             PostThreadMessage(threadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
 
         thread?.Join(1000);
         thread = null;
-        ready.Dispose();
+
+        // ready는 일부러 Dispose하지 않는다. Join이 타임아웃하면 메시지 스레드가 아직
+        // finally에서 ready.Set()을 부를 수 있고, 그 예외는 백그라운드 스레드 미처리 예외라
+        // 프로세스를 즉시 종료시킨다. 내부 핸들은 SafeHandle 파이널라이저가 정리한다.
     }
 
     // ---- Win32 ----
@@ -205,6 +296,7 @@ internal sealed class RawKeyboardListener : IDisposable
     private const uint RIM_TYPEKEYBOARD = 1;
     private const uint RIDEV_INPUTSINK = 0x00000100;
     private const ushort RI_KEY_BREAK = 0x01;
+    private const int ERROR_CLASS_ALREADY_EXISTS = 1410;
 
     private static readonly IntPtr HWND_MESSAGE = new(-3);
 
