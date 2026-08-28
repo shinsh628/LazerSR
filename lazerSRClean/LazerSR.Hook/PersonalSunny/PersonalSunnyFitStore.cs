@@ -9,7 +9,7 @@ namespace LazerSR.Hook.PersonalSunny;
 /// The latest personal fit result. <c>%LocalAppData%\LazerSR\personalsunny\fit.json</c>.
 /// <para>
 /// Persists <see cref="Alpha"/>/<see cref="Beta"/> alongside the deltas even though the offline
-/// reference tool (<c>personal_fit.py</c>) discards them - the widget's "accuracy 96% at what SR"
+/// reference tool (<c>personal_fit.py</c>) discards them - the widget's "accuracy 95% at what SR"
 /// figure is their inverse (<c>SR = (yTarget - alpha) / beta</c>), so they have to survive a restart
 /// just like the deltas do.
 /// </para>

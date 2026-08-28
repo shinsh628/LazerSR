@@ -49,7 +49,7 @@ public class StartupHook  // global namespace 필수
 
 ## 4. 실제 존재하는 패치 (2026-07-17 기준, 코드로 직접 확인)
 
-과거 설계원칙 문서는 "정확히 2개, 전부 `Select.*`의 `LoadComplete`"라고 서술했으나 **틀렸다.** 실제로는 14개(2026-08-19 기준):
+과거 설계원칙 문서는 "정확히 2개, 전부 `Select.*`의 `LoadComplete`"라고 서술했으나 **틀렸다.** 실제로는 18개(2026-08-21 기준):
 
 | 파일 | 타겟 | 방식 |
 |---|---|---|
@@ -67,6 +67,7 @@ public class StartupHook  // global namespace 필수
 | `Patches/ManiaSimulationGatePatch.cs` | `PlayerLoader.ReadyForGameplay` getter (2026-07-29 추가) | 시뮬레이션이 끝날 때까지 로딩 화면 유지 (진척 없음 10초 시 해제). 읽기 전용 (§9) |
 | `Patches/ResultsJudgementScatterPatch.cs` | `StatisticsPanel.CreateStatisticItems` (2026-07-29 추가) | 결과창 확장 통계 패널에 mania 판정 산점도 항목 삽입. 읽기 + 목록 concat (§12). 2026-08-08부터 `playableBeatmap`도 함께 넘긴다 (구간 sunnySR·구간 연습용) |
 | `Patches/PersonalSunnyScoreCollectorPatch.cs` | `Player.ImportScore` (2026-08-19 추가) | 실제 개인 스코어가 생성될 때 개인화diff 큐에 자동 적재. 읽기 전용 — `Score`의 이미 완성된 필드만 읽는다 (§17) |
+| `Patches/PersonalSunnyGameplayActivityPatch.cs`(패치 3개: Enter/Suspend/Exit) | `Player.LoadComplete`/`OnSuspending`/`OnExiting` (2026-08-20 추가) | `PersonalSunnyService.GameplayActive` static bool만 갱신 — `__instance`도 안 읽고 `OnExiting`의 `bool` 리턴값도 안 건드림. 개인화diff 백그라운드 워커가 게임플레이 중 동시성을 낮추기 위한 신호일 뿐 (§17) |
 | `Patches/PatternCopyMenuButtonPatch.cs` | `ButtonSystem.load` (**BDL 메서드**, 2026-08-21 추가) | 메인 메뉴 **편집** 서브메뉴에 '패턴 복제' 버튼 추가 (§19) |
 
 `Select.*`/`LoadComplete` 제약은 존재하는 패턴의 다수를 설명하지만 전부는 아니다. 새 패치를 만들 때 이 제약에 얽매이지 말고 §안전 가이드(`safety.md`)의 실제 레드라인을 따를 것.
@@ -632,27 +633,68 @@ sunny 상수 39개 중 11개(`Tuning/PersonalBox.Tuned`)를 한 사람의 실제
 
 ### 개인화 fit — `Tuning/PersonalJacobianBaker.cs` + `PersonalFitSolver.cs`
 
-맵 하나당 sunny를 23회 스윕(기준점 1 + 11개 상수 각각 ±H 중심차분, H=0.075 유닛공간, 박스는 만인 지점 중심 ±30%)해서 `SR0`(만인 지점 값) + 유닛공간 자코비안 11개를 굽는다. 이후 적합은 sunny를 다시 안 부르고 `SR(c0+d) ≈ SR0 + J·d` 선형화만으로 13×13(절편+β+개인 Δ 11개) ridge 정규방정식 하나를 푼다 — 가우스 소거, ridge=0.01 고정(오프라인 5-fold CV로 정한 값, 클라이언트는 재탐색 안 함).
+맵 하나당 sunny를 23회 스윕(기준점 1 + 11개 상수 각각 ±H 중심차분, H=0.075 유닛공간, 박스는 만인 지점 중심 ±30%)해서 `SR0`(만인 지점 값) + 유닛공간 자코비안 11개를 굽는다. 이후 적합은 sunny를 다시 안 부르고 `SR(c0+d) ≈ SR0 + J·d` 선형화만으로 α/β(sr0 단독 OLS)와 개인 Δ 11개(잔차를 자코비안에 ridge)를 2단계로 분리해서 푼다 — 가우스 소거, ridge=0.01 고정(오프라인 5-fold CV로 정한 값, 클라이언트는 재탐색 안 함).
 
-**α·β를 보존한다.** 파이썬 레퍼런스(`personal_fit.py`)는 프로파일 아웃하고 버리지만, 여기서는 위젯의 "정확도 96%에서 몇 성인가" 표시가 정확히 이 둘의 역산(`SR = (yTarget-α)/β`)이라 `PersonalSunnyFitStore`에 같이 저장한다.
+**2단계 ridge는 raw 자코비안 그대로에 페널티를 건다.** 11개 축이 서로 다른 자코비안 스케일을 갖다 보니 등방(isotropic) 페널티가 상관된 두 축(예: `MixFirst`/`PressingWeight`, 같은 strain-mix 분기를 반대로 누르는 구조라 r=-0.89) 중 스케일이 큰 쪽에 credit을 몰아주는 편향이 있음이 실측으로 확인됐다. 열별 표준편차로 정규화하는 방식을 2026-08-22에 시도해 held-out 예측 오차는 개선됐지만, 정규화된 축(특히 `ChordScale`처럼 원래 분산이 작은 축)에 기존 `ridge=0.01`이 턱없이 약해 언클램프 해가 박스를 최대 6배 벗어났고, 클램프가 그 초과분을 자르며 원래 α가 흡수했어야 할 성분이 새 나가 350개 채보 전부에 균일한 -0.54 SR 하락을 만드는 사고로 이어져 롤백했다. 정규화 아이디어 자체는 유효해 보이나 ridge 재보정 없이는 위험 — 상관축 짝지음 페널티도 시도했으나 held-out CV 기준 오히려 나빠져 보류. `PersonalFitSolver.Solve` XML 문서 참고.
 
-### 파이프라인 — `Hook/PersonalSunny/`
+**α·β를 보존한다.** 파이썬 레퍼런스(`personal_fit.py`)는 프로파일 아웃하고 버리지만, 여기서는 위젯의 "정확도 95%에서 몇 성인가"(`PersonalSunnyWidget.target_accuracy`) 표시가 정확히 이 둘의 역산(`SR = (yTarget-α)/β`)이라 `PersonalSunnyFitStore`에 같이 저장한다.
+
+### 파이프라인 v2 — 2-pool broad/narrow (2026-08-20 재설계)
+
+v1(2026-08-19)은 최근 100개 FIFO 하나뿐이었다. 문제: 정확도로 표본을 뽑는 게 아니라 순수 최근성이라 실력 천장 근처 데이터가 잘 안 모이고, SR 스프레드도 좁았다. v2는 풀을 두 개로 나눈다.
 
 ```
-스코어 생성(Player.ImportScore) 또는 수동 수집(realm 백필)
-  → PersonalSunnyQueueStore (FIFO 100개, 맵+배속+HO/IN 모드시그니처+정확도)
-  → 큐에 없는 (맵,모드시그니처) 키만 굽기 → PersonalSunnyJacStore
-  → 큐 전체로 refit → PersonalDiff.Update() + PersonalSunnyFitStore.Save()
+Pool A — 상위 200 ("실력 천장", Performance 기준, PersonalSunnyTopPoolEntry.Performance)
+  ordered map: Dictionary<ChartKey,Entry>(존재조회) + SortedSet<(Performance,ChartKey)>(정렬·min-eviction)
+  PersonalSunnyTopPoolStore, capacity 200(2026-08-22, 300에서 축소), 재도전 시 Performance가 기존보다 높을 때만 in-place 갱신(2026-08-22 수정 - 원래 무조건 덮어써서 더 나쁜 재도전이 개인 최고 기록을 지워버리는 버그가 있었음, 실측으로 확인)
+  schema_version 2(2026-08-22, 300->200 캐패시티 변경으로 bump - 이 값이 안 맞는 파일은 로드 시 그냥 버려짐. 이 풀의 캐패시티/랭킹공식/eviction 의미가 바뀔 때마다 반드시 같이 bump할 것 - Pool B(QueueStore)와 달리 Offer()는 항상 "더 나을 때만" 갱신이라 옛 파일이 새 로직으로 저절로 안 맞춰짐)
+
+Pool B — 최근 100 중 상위 50 (평소 실력, 정확도 85% 고정 하한)
+  PersonalSunnyQueueStore, FIFO 100개, dedup 없음 - 저장 자체는 그대로
+  fit 투입 시점(combinedEntries)에서만 채보당 최고 정확도 1개로 dedup 후 Performance 상위 50개로 축소(2026-08-22)
 ```
 
-- **큐 키는 맵 MD5 + 정확한 배속 + HO/IN 여부다.** DT/HT/NC/DC는 배속만 같으면 캐시를 공유해도 되지만(타이밍만 스케일된 채보라 차이 없음), HO/IN은 `IApplicableAfterBeatmapConversion`으로 `HitObjects` 자체를 재작성하므로 별도 키가 필요하다.
-- **자동 수집은 `Player.ImportScore`가 유일한 진입점**이고, 훈련/구간연습/리플레이감상용 `Player` 파생 클래스들은 전부 이 메서드를 `base` 호출 없이 override하므로(safety.md 서버 격리 표) 패치가 그쪽엔 자동으로 안 걸린다 — 별도 필터 불필요.
-- **필터는 화이트리스트**다: 본인 스코어 + mania 4K + pass + 모드가 {NM,DT,HT,NC,DC,HO,IN} 안에만 있을 것. 그 외 모드(HD/FL/HR/EZ 등)가 하나라도 섞이면 그 스코어는 통째로 제외.
-- **위젯은 상태를 폴링한다.** `PersonalSunnyService`의 상태(`IsBaking`/`BakeDone`/`BakeTotal`/`Alpha`/`Beta`/`QueueCount`)는 전부 평범한 static 프로퍼티이고, `Version`이 바뀔 때만 위젯이 `Update()`에서 다시 읽는다 — `ManiaSimulationProgressDisplay`와 같은 패턴. 백그라운드 스레드에서 Drawable을 직접 건드리지 않기 위한 선택.
+Pool A는 원래 순수 SR로 뽑았으나(2026-08-20 설계), 실기 대조 결과 선형모델이 저SR 천장효과를 못 담아내는 게 드러나 2026-08-21에 `Performance`(osu! `ManiaPerformanceCalculator`의 SR^2.2×정확도 배율 곡선을 그대로 차용, 80% 미만 정확도는 자동 0) 기준으로 전면 교체됐다 — 정렬만 바뀌었을 뿐 "정확도로 표본을 거르지 않는다"는 원래 취지(선택편향 회피)는 유지된다. 반면 SR만으로는 천장 근처에 몰려 스프레드가 좁아 ridge fit의 β 추정이 불안정해지므로, Pool B가 낮은/중간 SR의 "평소" 정확도를 보충한다.
+
+**"실력 천장" 풀인데 최고 기록이 안 남는 버그가 두 겹으로 있었다(2026-08-22, 실측으로 확인).** `Offer()` 자체가 이미 풀에 있는 채보를 무조건 최신 기록으로 덮어썼고, 전체 재수집 경로(`runBroadPhase`의 `perChart`)도 채보당 "가장 최근 플레이"를 대표로 뽑아 `Offer()`에 넘겨 애초에 최고 기록이 도달을 못 했다. 두 층 다 고쳐서 해소 — `Offer()`의 실시간 단일 반영 경로(`Player.ImportScore` → `offerToTopPool`)는 이 dedup을 안 거치므로 처음부터 정상이었다.
+
+**Pool B의 진입 문턱(`passesRecentPoolFloor`)은 정확도 85% 고정이지 Performance 상대값이 아니다.** 한때 "Pool A 최댓값 × 0.7"(Performance 상대값)로 시도했으나, 이 방식은 SR이 낮은 채보가 문턱을 넘으려면 정확도를 거의 만점급으로 밀어올려야 해서 Pool B의 저SR 구간이 "저SR+고정확도"로만 쏠리고, 그 결과 ridge fit의 β(SR-정확도 공분산 기울기)가 과도하게 가팔라져 목표 SR이 실측보다 낮게 나오는 문제가 있었다(2026-08-21 재검토). 고정 85% 컷은 SR과 무관하게 "성실한 시도"만 거르므로 이 왜곡이 없다 — 85%는 2026-08-21 이상치 분석(진짜 이상치 0.1347, 다음 정상값 0.4238, 정상 꼬리는 0.60부터)에서 가져온 값.
+
+**Pool B는 Arcaea 포텐셜(b30+r10) 방식을 따라 저장 풀 전체가 아니라 그 중 상위 일부만 fit에 넣는다(2026-08-22).** Arcaea의 Recent10은 "최근 30판 중 Play Rating 상위 10개, 채보당 최고 1개만"으로 계산된다 — `PersonalSunnyQueueStore`(최근 100개 FIFO)를 그대로 두고, `combinedEntries()`가 fit 입력을 만들 때만 채보 키로 그룹핑해 최고 정확도 1개씩 남긴 뒤 `Performance` 상위 `recent_pool_effective_count`(50, 비율은 Arcaea의 1:3 대신 1:2)개만 뽑는다. `PersonalSunnyQueueStore` 자체(저장/FIFO/85% 문턱)는 안 건드린다 — 이 축소는 오직 fit 투입 단계에만 적용. 최종 fit 입력은 `combinedEntries()`(Pool A ∪ Pool B의 이 축소분, dedup 없이 그냥 이어붙임 — Arcaea b30+r10 선례처럼 겹침 허용, 2026-08-20 피드백 반영)다.
+
+#### 계산 깔때기 (broad → narrow)
+
+```
+[0] 채보(맵,배속,모드) 단위 dedup — 최근 순이 아니라 정확도 최고치가 대표(2026-08-22 수정, 아래 참고)
+[1] 무료 필터 — NM / DT·NC@1.5x / HT·DC@0.75x 3버킷, 각각 BeatmapInfo.StarRating(osu! 자신이 이미
+    realm에 계산해둔 NoMod 값, 읽기만 함)으로 상위 2,000 컷. -1(미계산)은 무조건 통과.
+    3버킷으로 나누는 이유: 배속 모드의 실제 난이도는 저장값보다 높아서(HT/DC는 낮아서) NM과 한
+    리스트로 같이 정렬하면 부당비교가 된다. 여유폭 2,000은 실측 데이터 없이 고정한 값(재검토 이슈).
+[2] Broad-phase — 생존자만 PersonalJacobianBaker.CalculateUniversalSr(1회 계산, Bake의 앞부분만
+    떼어낸 것)를 병렬로 실행, 결과는 PersonalSunnyChartSrStore(경량 캐시, 채보당 평생 1회)에 저장
+[3] 정확한 상위 200 확정 → PersonalSunnyTopPoolStore.Offer
+[4] Narrow-phase — Pool A∪B에 대해서만 기존 23-sweep 자코비안 굽기(PersonalSunnyJacStore)
+```
+
+- **broad-phase(runBroadPhase)와 narrow-phase(bakeMissing) 둘 다 `Parallel.ForEach`**를 쓴다. `BeatmapManager.QueryBeatmap`/`GetWorkingBeatmap`은 osu! 소스 확인 결과 내부적으로 `Realm.Run`/`WorkingBeatmapCache`의 `lock`으로 이미 스레드 안전하다. 우리 쪽 캐시 3개(`PersonalSunnyChartSrStore`/`PersonalSunnyJacStore`/`PersonalSunnyTopPoolStore`)는 각자 자체 락(`ConcurrentDictionary`+저장전용 락, 또는 `PersonalSunnyTopPoolStore`처럼 두 컬렉션을 함께 지키는 단일 락)을 갖고 있어 병렬 호출에 안전하다.
+- **캐시는 2종류, 무효화 기준도 같이 챙긴다.** `PersonalSunnyChartSrStore`(경량, broad-phase 후보 전체를 넓게 들고 있음)와 `PersonalSunnyJacStore`(무거움, Pool A∪B로 뽑힌 것만) 둘 다 `UniversalDiff.Deltas`를 문자열로 스냅샷해 파일에 같이 저장 — 만인diff가 리튜닝되면 자동으로 폐기되고 재계산된다. `refit()`은 `PersonalSunnyJacStore`만 Pool A∪B로 pruning하고 `PersonalSunnyChartSrStore`는 일부러 안 건드린다(성격이 다른 캐시).
+- **캐시 3개(`PersonalSunnyChartSrStore`/`PersonalSunnyJacStore`/`PersonalSunnyTopPoolStore`) 모두 `Put`/`Offer`에 `save: bool = true` 매개변수가 있다(2026-08-22 추가).** 기본값 `true`는 `RecordScore`의 단건 실시간 반영 경로용 — 그때그때 바로 파일에 씀. `runBroadPhase`/`bakeMissing`의 `Parallel.ForEach`는 캐시가 비어있는 최초 실행에서 후보 수천 개를 처리하는데, 항목마다 전체 캐시를 재직렬화해 쓰면 O(n) 쓰기를 n번(=O(n²)) 하는 데다 스레드마다 같은 저장 락을 두고 경합해 병렬성도 깎아먹는다 — 그래서 이 두 곳은 `save: false`로 메모리만 갱신하고 루프가 끝난 뒤 `Flush()`를 한 번만 호출한다.
+- **채보 키는 이제 (맵 MD5, 정확한 배속) 사실상 둘뿐이다.** `PersonalSunnyModWhitelist`가 2026-08-20부터 osu! 자신의 `Mod.Ranked`(DT/HT/NC/DC는 `SpeedChange.IsDefault`일 때만 true)를 그대로 가져다 써서 **정확히 1.5x/0.75x가 아닌 배속과 HO/IN을 아예 큐 진입 단계에서 제외**한다 — HO/IN처럼 `HitObjects` 자체를 재작성하는 모드는 broad-phase 무료필터(원본 채보의 저장된 SR)가 순위 프록시로 못 쓰이기 때문(방향을 예측할 수 없는 오차). `ChartMod` 필드는 구조상 남아있지만 이제 항상 `null`.
+- **자동 수집은 `Player.ImportScore`가 유일한 진입점**이고, 훈련/구간연습/리플레이감상용 `Player` 파생 클래스들은 전부 이 메서드를 `base` 호출 없이 override하므로(safety.md 서버 격리 표) 패치가 그쪽엔 자동으로 안 걸린다. `RecordScore`가 Pool B에 추가하면서 `offerToTopPool`로 Pool A 경쟁에도 반영한다(broad-phase 전체를 다시 돌 필요 없이, 그 채보 하나만 `resolveUniversalSr`).
+
+#### 백그라운드 선제 계산 — `PersonalSunnyService.StartBackgroundWarmup`
+
+osu! 자신의 `BeatmapUpdater`(임포트 시 스레드풀로 별점을 미리 계산해 realm에 저장)와 같은 패턴이다. 위 broad/narrow 파이프라인을 반응형(수집 버튼)이 아니라 **위젯이 처음 로드될 때 자동으로 한 번** 돌린다(`Interlocked.CompareExchange`로 세션당 1회만, `Task.Run`) — 계산 로직·캐시는 완전히 동일한 것을 재사용, 트리거만 다르다.
+
+- **위젯 Drawable 생명주기와 무관하게 산다.** 워커는 `PersonalSunnyService`(static)에 있고 `Task.Run`으로 떠 있어서, 선곡→게임플레이→결과창으로 화면이 바뀌어도(위젯 자체는 게임플레이 중 안 그려짐) 계속 돈다.
+- **게임플레이 중엔 동시성을 1로 낮춘다.** `Patches/PersonalSunnyGameplayActivityPatch.cs`가 `Player.LoadComplete`/`OnSuspending`/`OnExiting`을 Postfix해서 `PersonalSunnyService.GameplayActive`만 갱신하고(읽기 전용, 라이브 인스턴스 무관), broad/narrow 두 `Parallel.ForEach`가 이 값을 보는 `currentParallelism()`을 쓴다. 훈련/구간연습/리플레이도 전부 대상 — CPU 경합이 관심사라 `PlayerGameplayPatch`처럼 특정 Player 종류를 가릴 이유가 없다.
+- 초기 이력 스캔 자체는 못 없앤다 — 다만 **채보당 평생 1번**(SR 캐시)이라 두 번째 실행부터는 새로 생긴 채보만 계산한다.
 
 ### 위젯 — `Widgets/PersonalSunnyWidget.cs`
 
-선곡 화면 전용(`GameplayState`가 잡히면 그리지 않음 — `SkinWidgetRegistrarPatch`가 HUD/선곡 두 툴박스에 다 노출시키므로 §16과 같은 이유로 자체 판별 필요). 위쪽에 pill 2개 — 현재 스코프된 맵의 (만인+개인) sunnySR, 그리고 이 사람이 정확도 96%를 뽑는 sunny 값(맵과 무관, α·β 역산). 아래쪽은 굽는 중이면 진행률 막대, 아니면 큐개수/100 + 수집 버튼.
+선곡 화면 전용(`GameplayState`가 잡히면 그리지 않음 — `SkinWidgetRegistrarPatch`가 HUD/선곡 두 툴박스에 다 노출시키므로 §16과 같은 이유로 자체 판별 필요). 위쪽에 pill 2개 — 현재 스코프된 맵의 (만인+개인) sunnySR, 그리고 이 사람이 정확도 95%를 뽑는 sunny 값(맵과 무관, α·β 역산). 아래쪽은 굽는 중이면 진행률 막대, 아니면 **`"최고 {TopPoolRecordCount}/{PersonalSunnyTopPoolStore.Capacity} · 최근 {RecentPoolRecordCount}/{RecentPoolEffectiveCount}"` + 수집 버튼**(2026-08-22) — 각 풀을 "그 풀 자체 상한 대비 분수"로 보여준다. 총합 하나로 합치거나 raw+반영을 섞어 보여주는 방식도 검토했으나, 전자는 두 풀의 성격 차이가 안 드러나고 후자는 Pool B 원본이 늘어도 개인화엔 영향 없는데 숫자만 커지는 문제가 있어 이 분수 표기로 확정.
+
+수집 버튼(`onCollectClicked`)은 `PersonalSunnyService.ResetAndCollectFromRealmAsync`를 부른다(2026-08-22 신규) — `PersonalSunnyTopPoolStore.Clear()` 후 `CollectFromRealmAsync`. Pool B는 `ReplaceQueueAndRun`이 매 수집마다 전체 교체라 이미 매번 리셋되지만, Pool A는 `Offer()`가 항상 "더 나을 때만 갱신"이라 그 자체로는 절대 안 비워진다 — 캐패시티·랭킹 공식이 바뀌어도 이미 저장된 파일이 새 로직에 맞게 저절로 줄어들거나 재정렬되지 않는다는 뜻. 그래서 수동 버튼은 명시적으로 Pool A를 비우고 처음부터 다시 채운다(자동 백그라운드 워밍업/실시간 `RecordScore` 경로는 그대로 증분 유지 — 매번 통째로 다시 도는 건 낭비).
 
 ---
 

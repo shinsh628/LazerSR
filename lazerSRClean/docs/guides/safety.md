@@ -124,6 +124,16 @@ osu!는 커널 레벨 안티치트가 없고, `tosu`/`gosumemory`/`StreamCompani
 
 굽기(`PersonalJacobianBaker`)가 sunny를 23회 돌리는 것은 **별도 인스턴스**(`SunnyManiaDifficultyCalculator`를 매번 `new`)에 `SunnyConstants.WithIsolatedDiff`로 임시 상수만 흘려보내는 것이라, `safety.md`의 "라이브 vs 시뮬레이션 인스턴스" 원칙과 같은 성격 — osu! 라이브 난이도 계산 경로에는 손대지 않는다.
 
+### v2 — broad/narrow 2-pool 재설계 (2026-08-20)
+
+새로 생긴 표면 3곳 전부 레드라인에 안 걸린다:
+
+- **`BeatmapInfo.StarRating` 읽기**(`runBroadPhase`의 무료필터) — realm에 이미 저장된 osu! 자신의 값을 읽기만 한다. 쓰지 않는다(레드라인 4).
+- **백그라운드 선제 워커**(`PersonalSunnyService.StartBackgroundWarmup`) — `CollectFromRealmAsync`와 완전히 같은, 이미 안전성 확인된 파이프라인을 트리거만 다르게(위젯 로드 시 자동) 돈다. 새로 하는 일이 없다.
+- **`Patches/PersonalSunnyGameplayActivityPatch.cs`**(`Player.LoadComplete`/`OnSuspending`/`OnExiting` Postfix 3개) — `__instance`도 안 읽고, `OnExiting`의 `bool` 리턴값도 안 건드리고, 오직 `PersonalSunnyService.GameplayActive` static bool 하나만 갱신한다. 라이브 인스턴스 접근도 없고 게임플레이 동작에 어떤 영향도 못 준다 — 백그라운드 워커가 CPU 경합을 피하려고 참고하는 신호일 뿐.
+
+`BeatmapManager.QueryBeatmap`/`GetWorkingBeatmap`을 `Parallel.ForEach`로 병렬 호출하는 것도 안전 레드라인과 무관하다(osu! 소스 확인 결과 두 메서드 다 스레드 안전) — 다만 우리 캐시(`PersonalSunnyChartSrStore`/`PersonalSunnyJacStore`/`PersonalSunnyTopPoolStore`)에 자체 락을 걸어 데이터 레이스를 막았다.
+
 ## 결과창 구간 연습의 서버 격리 (2026-08-08)
 
 구간 연습은 **완전 로컬 세션**이다. 무한 트레이닝의 차단 5개(위 표)를 그대로 따르되, 진입 경로가 결과창이라 **활동 상태에서 더 강한 성질**을 갖는다.

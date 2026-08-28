@@ -18,13 +18,22 @@ public static class PersonalJacobianBaker
     /// <summary><see cref="Sr0"/> at the universal point, and the unit-space slope for each of <see cref="PersonalBox.Tuned"/>.</summary>
     public record Result(double Sr0, double[] Jacobian);
 
+    /// <summary>
+    /// The cheap half of <see cref="Bake"/> alone: sunny SR at the universal point (stock + <see cref="UniversalDiff"/>),
+    /// one sunny call. Kept as its own entry point so a broad-phase ranking pass can call just this -
+    /// without paying for the other 22 calls <see cref="Bake"/> makes - for candidates that may never
+    /// need a full Jacobian. <see cref="Bake"/> calls this too, rather than duplicating it.
+    /// </summary>
+    public static double CalculateUniversalSr(IBeatmap beatmap, IReadOnlyList<Mod>? mods, CancellationToken token = default) =>
+        SunnyConstants.WithIsolatedDiff(UniversalDiff.Deltas, () => new SunnyManiaDifficultyCalculator().Calculate(beatmap, mods, token));
+
     /// <param name="beatmap">Already playable (mods applied) - the same beatmap is reused for all 23 sweeps, since only the constants change between them, not the chart.</param>
     public static Result Bake(IBeatmap beatmap, IReadOnlyList<Mod>? mods, CancellationToken token = default)
     {
         var calculator = new SunnyManiaDifficultyCalculator();
         double[] baseDeltas = UniversalDiff.Deltas;
 
-        double sr0 = SunnyConstants.WithIsolatedDiff(baseDeltas, () => calculator.Calculate(beatmap, mods, token));
+        double sr0 = CalculateUniversalSr(beatmap, mods, token);
 
         var jacobian = new double[PersonalBox.Tuned.Length];
 
