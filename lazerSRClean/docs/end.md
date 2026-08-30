@@ -7,21 +7,28 @@
 ### 1a. 기본 경로 — 태그 push (CI가 빌드 + 릴리즈까지 전부 처리)
 
 ```powershell
+# (권장) .iss MyAppVersion + .csproj <Version>을 새 버전으로 올려 커밋 — 아래 "버전" 참고
 git tag -a v{version} -m "v{version}"   # 예: v6.4.1
 git push origin v{version}
 ```
 
 `v*.*.*` 태그 push가 워크플로를 트리거한다. 워크플로가 하는 일:
-1. `dotnet publish LazerSR.Launcher\LazerSR.Launcher.csproj -c Release`
+1. `dotnet publish LazerSR.Launcher\LazerSR.Launcher.csproj -c Release /p:Version=<태그버전>` (버전 주입 — 런처 자동 업데이트가 이 값을 본다)
 2. **체크아웃된 워크스페이스 사본**의 `installer\LazerSRClean.iss`에서 `MyAppVersion`/`MyPublishDir`/`OutputDir`를 태그 버전·러너 경로로 치환 — **저장소에 커밋된 `.iss` 원본은 건드리지 않는다.** 즉 태그를 올리기 전에 로컬 `.iss`의 버전을 미리 손으로 바꿔둘 필요가 없다.
 3. Inno Setup(ISCC)로 컴파일
 4. 인스톨러를 워크플로 아티팩트로 업로드
-5. **태그 push로 트리거된 경우에만** GitHub Release를 태그 이름으로 자동 생성하고 exe를 첨부
+5. **태그 push로 트리거된 경우에만** GitHub Release를 태그 이름으로 자동 생성하고 exe를 첨부 — 이 Release가 곧 다른 사용자 런처의 자동 업데이트 소스다 (`architecture.md` §21)
 
 진행 상황 확인:
 ```powershell
 gh run list --repo shinsh628/LazerSR --workflow=build-installer.yml --limit 3
 ```
+
+**버전**: 워크플로의 launcher publish는 `/p:Version=<태그버전>`을 주입하므로, 런처 자동 업데이트가
+비교에 쓰는 어셈블리 버전이 곧 태그 버전이 된다 (`architecture.md` §21). CI 산출물만 놓고 보면 태그 push
+전에 `.iss`/`.csproj`를 손볼 필요가 없지만, **로컬 폴백 빌드(1b)의 런처가 자기 버전을 정직하게 보고하려면**
+`.iss`의 `MyAppVersion`과 `.csproj`의 `<Version>`을 새 버전으로 같이 올려 커밋하는 것이 권장 절차다.
+(예: v6.7.0 릴리즈 때 둘 다 6.7.0으로 올려 커밋 → 태그.)
 
 버전 번호만 바꿔 수동으로 다시 돌리고 싶으면(태그 없이) `workflow_dispatch`로도 실행 가능 — GitHub Actions 탭에서 "Run workflow" + 버전 입력, 또는 `gh workflow run build-installer.yml -f version=6.4.1`. 기본값(`create_release` 체크 해제)에서는 release를 만들지 않고 아티팩트만 나온다.
 
@@ -40,11 +47,6 @@ gh workflow run build-installer.yml -f version=6.5.3 -f create_release=true --re
 
 > **주의**: GitHub 웹 UI의 "Draft a new release"로 태그를 만들지 말 것. 릴리즈가 먼저 생기면
 > 태그 push 이벤트로 돌아온 워크플로의 `gh release create`가 중복으로 실패해 **exe가 첨부되지 않는다.**
-
-**버전**: 워크플로의 launcher publish는 `/p:Version=<태그버전>`을 주입하므로 런처 자동 업데이트가
-비교에 쓰는 어셈블리 버전이 곧 태그 버전이 된다 (`architecture.md` §21). 태그 push 전에 `.csproj`의
-`<Version>`을 미리 손볼 필요는 없다 — 다만 로컬 폴백 빌드(1b)의 런처가 정직하려면 `.iss`의
-`MyAppVersion`을 올릴 때 `.csproj`의 `<Version>`도 같이 올려두는 편이 좋다.
 
 **주의**: `installer\LazerSRClean.iss`의 `AppId`는 절대 바꾸지 않는다 (업그레이드 인식용, 최초 LazerSR과 동일 유지). `[Files]` 목록에 새 의존 DLL을 추가했다면(`architecture.md` §8) `.iss`의 `[Files]` 섹션도 같이 갱신하고 커밋할 것 — 이건 워크플로가 대신 해주지 않는다.
 
