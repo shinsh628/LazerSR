@@ -41,6 +41,11 @@ gh workflow run build-installer.yml -f version=6.5.3 -f create_release=true --re
 > **주의**: GitHub 웹 UI의 "Draft a new release"로 태그를 만들지 말 것. 릴리즈가 먼저 생기면
 > 태그 push 이벤트로 돌아온 워크플로의 `gh release create`가 중복으로 실패해 **exe가 첨부되지 않는다.**
 
+**버전**: 워크플로의 launcher publish는 `/p:Version=<태그버전>`을 주입하므로 런처 자동 업데이트가
+비교에 쓰는 어셈블리 버전이 곧 태그 버전이 된다 (`architecture.md` §21). 태그 push 전에 `.csproj`의
+`<Version>`을 미리 손볼 필요는 없다 — 다만 로컬 폴백 빌드(1b)의 런처가 정직하려면 `.iss`의
+`MyAppVersion`을 올릴 때 `.csproj`의 `<Version>`도 같이 올려두는 편이 좋다.
+
 **주의**: `installer\LazerSRClean.iss`의 `AppId`는 절대 바꾸지 않는다 (업그레이드 인식용, 최초 LazerSR과 동일 유지). `[Files]` 목록에 새 의존 DLL을 추가했다면(`architecture.md` §8) `.iss`의 `[Files]` 섹션도 같이 갱신하고 커밋할 것 — 이건 워크플로가 대신 해주지 않는다.
 
 ### 1b. 폴백 — 로컬 수동 빌드 (CI 없이 확인만 하고 싶을 때)

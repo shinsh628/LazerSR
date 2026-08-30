@@ -48,7 +48,7 @@ jobs:
 
       - name: Publish Launcher (pulls in Hook/SunnyCalculator via ProjectReference)
         working-directory: lazerSRClean
-        run: dotnet publish "LazerSR.Launcher\LazerSR.Launcher.csproj" -c Release
+        run: dotnet publish "LazerSR.Launcher\LazerSR.Launcher.csproj" -c Release /p:Version=${{ steps.version.outputs.value }}
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y

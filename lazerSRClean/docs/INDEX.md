@@ -57,6 +57,7 @@
 | `LazerSR.Hook\Ipc\PipeServer.cs` | Named Pipe 서버 (`sunny:on/off` + ad-hoc 브로드캐스트) | 관리대상 |
 | `LazerSR.Launcher\` | WPF 런처 EXE — osu! 실행 + Pipe 클라이언트 | **관리대상** |
 | `LazerSR.Launcher\Configuration\` | 설치 경로/설정 저장 | 관리대상 |
+| `LazerSR.Launcher\Update\` | GitHub Releases 기반 자동 업데이트 검사·다운로드 (`architecture.md` §21) | **관리대상** (2026-08-30 신규) |
 | `LazerSR.SunnyCalculator\` | 독립 sunnySR 계산 파이프라인 (osu! `DifficultyCalculator` 비상속) | **관리대상** |
 | `LazerSR.SunnyCalculator\Difficulty\` | sunnyosu에서 이식된 skill/evaluator/preprocessor | 관리대상 |
 | `LazerSR.SunnyCalculator\Tuning\` | sunny 상수 39개 + 만인/개인화 diff + `WithIsolatedDiff` 격리 계층 + 개인화 fit 솔버/굽기. `architecture.md` §17 | **관리대상** (2026-08-19 확장) |

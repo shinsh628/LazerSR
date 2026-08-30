@@ -878,3 +878,44 @@ vsync가 present를 막기 때문이다. 그런데 **가려진 창은 vsync에 �
 - **표시**: `pill.Current.Value`에 새 값을 넣기만 한다. `StarRatingDisplay(animated: true)`가
   `100 + 80·|Δ|`ms 트윈으로 직전 표시값→새 값을 추종하고 색도 그 트윈값을 따라가므로 0으로 튀지 않는다.
 - 서버 레드라인 무관: 읽기 전용, 라이브 인스턴스 미접근, 네트워크·파일 쓰기 없음.
+
+---
+
+## 21. 런처 자동 업데이트 (2026-08-30 신규)
+
+런처(`LazerSR.Launcher`)가 **GUI 창을 띄우기 전에** GitHub Releases에서 새 버전을 확인하고, 있으면
+업데이트할지 묻는다. 개인 서버 없이 GitHub만 쓴다 — `shinsh628/LazerSR`가 public이라 API 토큰이 필요 없다.
+
+| 파일 | 역할 |
+|---|---|
+| `LazerSR.Launcher\Update\UpdateChecker.cs` | `api.github.com/.../releases/latest` 조회 + setup exe 다운로드/실행 + 다운로드 진행률 창 |
+| `LazerSR.Launcher\App.xaml.cs` | `OnStartup`에서 검사 → `MessageBox`(예/아니오) → 예면 다운로드 후 `Environment.Exit`, 아니오/실패/없음이면 `MainWindow` |
+| `LazerSR.Launcher\App.xaml` | `StartupUri` 제거 (창 생성은 이제 코드가 한다) |
+
+### 흐름
+
+```
+런처 실행 → ShutdownMode=OnExplicitShutdown (아직 창 없음)
+  → UpdateChecker.CheckAsync() (5초 타임아웃, 실패 시 null)
+      · 새 버전 없음/네트워크 없음/에러  → MainWindow 표시
+      · 새 버전 있음 → "지금 업데이트할까요?" MessageBox
+          · 나중에  → MainWindow 표시
+          · 예      → %TEMP%에 setup exe 다운로드 → 실행 → Environment.Exit(0)
+                      (인스톨러가 CloseApplications로 남은 프로세스 정리 + 구버전 제거 + 재실행)
+```
+
+### 반드시 알아야 하는 것
+
+- **버전 출처는 런처 어셈블리 버전**이다. 로컬 폴백 빌드는 `.csproj`의 `<Version>`(현재 6.6.3), CI는
+  `dotnet publish /p:Version=<태그>`로 덮어써서 **태그 버전 = 런처 버전**이 된다. `<Version>`은 `.iss`의
+  `MyAppVersion`과 함께 올린다(둘 다 현재 6.7.0). 같이 올려두면 로컬 빌드도 정직해진다(CI 산출물은 어차피 태그가 authoritative).
+- **비교는 `major.minor.build`만** 본다(`Normalize`). 태그 `v6.6.3` → `Version(6,6,3)`, SemVer 꼬리표
+  (`+hash`, `-beta`)는 잘라낸다.
+- **어떤 실패도 런처 실행을 막지 않는다.** `CheckAsync`/`DownloadAndRunAsync`는 예외를 밖으로 안 내보내고
+  `null`/`false`만 돌려준다. `OnStartup`도 전체를 try/catch로 감싼다.
+- **asset 선택은 이름이 `.exe`로 끝나는 첫 번째**다 (`LazerSR-v{x}-Setup.exe`).
+- **서버 레드라인 무관**: 네트워크 호출을 하는 것은 **런처**이지 osu!에 주입되는 Hook이 아니다.
+  레드라인 2("osu! 프로세스에서 나가는 네트워크 호출 금지")는 Hook 전용이고 런처는 이미
+  파이프·업데이트 프로바이더 환경변수 등으로 외부와 통신한다. 점수·판정·리플레이와 무관.
+- `ShutdownMode`를 검사 동안 `OnExplicitShutdown`으로 뒀다가 창을 띄우기 직전 `OnLastWindowClose`로
+  되돌린다 — 안 그러면 창 없는 await 구간에서 앱이 살아있을 근거가 없다.
