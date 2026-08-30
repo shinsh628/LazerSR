@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using LazerSR.Launcher.Configuration;
 using LazerSR.Launcher.Ipc;
+using LazerSR.Launcher.Upload;
 using Microsoft.Win32;
 
 namespace LazerSR.Launcher;
@@ -148,12 +149,16 @@ public partial class MainWindow : Window
         }
         else if (payload.StartsWith("queued:"))
         {
-            // 진단용 빌드(원인 확정될 때까지만): 실제 업로드는 안 하고 스캔 결과만 보여준다.
-            // "seen=" 목록에 본인 계정 말고 다른 이름이 있는지, localId/localName이 본인 계정이
-            // 맞는지 확인해서 그대로 알려주면 된다.
-            StatusTextBlock.Text = payload;
-            ReplaySyncButton.IsEnabled = true;
-            _replaySyncInFlight = false;
+            StatusTextBlock.Text = "업로드 시작...";
+            try
+            {
+                await ReplayUploader.SyncAsync(_settingsStore, status => Dispatcher.Invoke(() => StatusTextBlock.Text = status));
+            }
+            finally
+            {
+                ReplaySyncButton.IsEnabled = true;
+                _replaySyncInFlight = false;
+            }
         }
     }
 

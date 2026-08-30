@@ -42,6 +42,12 @@ internal static class ReplayUploadService
         string localUsername = api.LocalUser.Value.Username;
         if (localUserId <= 0) return new SyncDiagnostics(0, localUserId, localUsername, 0, Array.Empty<string>());
 
+        // 매 동기화마다 큐를 통째로 비우고 이번 스캔 결과로만 새로 채운다. 예전(필터 없던 버전
+        // 등) 스캔이 남긴 다른 계정 소유 큐 파일이 이번 결과와 섞여 업로드되는 걸 원천 차단한다 -
+        // 업로더는 큐 폴더에 있는 걸 누구 것인지 안 가리고 다 보내기 때문에, 걸러진 채로 남는
+        // 게 없어야 한다.
+        ClearQueue();
+
         var filesStorage = storage.GetStorageForDirectory("files");
         int written = 0;
         int maniaWithReplaySeen = 0;
@@ -82,6 +88,25 @@ internal static class ReplayUploadService
         });
 
         return new SyncDiagnostics(written, localUserId, localUsername, maniaWithReplaySeen, distinctUsers.ToList());
+    }
+
+    private static void ClearQueue()
+    {
+        try
+        {
+            string folder = LazerSrStorage.GetFolder("replayupload");
+            if (string.IsNullOrEmpty(folder)) return;
+
+            foreach (string file in Directory.GetFiles(folder, "*.json"))
+            {
+                try { File.Delete(file); }
+                catch (Exception e) { HookLog.Write($"[LazerSR] ReplayUploadService: ClearQueue couldn't delete {file}: {e}"); }
+            }
+        }
+        catch (Exception e)
+        {
+            HookLog.Write($"[LazerSR] ReplayUploadService: ClearQueue failed: {e}");
+        }
     }
 
     private static bool WriteQueueEntry(ScoreInfo score, string replayPath)

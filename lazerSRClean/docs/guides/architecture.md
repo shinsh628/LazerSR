@@ -970,3 +970,8 @@ API 키를 아직 저장하지 않았으면 **첫 큐 파일의 `osu_username`�
   이름으로 서버에 올라감). `HookRuntimeContext.Api`(`IAPIProvider`, `DifficultyDisplayPatch`가 함께
   stash)의 `LocalUser.Value.Id`와 `score.RealmUser.OnlineID`가 같은 것만 큐잉한다. 로그인 안 된 상태면
   `notready`로 처리(아무것도 안 보냄) - 잘못 걸러지느니 아예 안 보내는 쪽이 안전하다.
+- **매 스캔마다 큐 폴더를 먼저 비운다** (2026-08-31 v6.8.3). 필터가 없던 구버전이 남긴 큐 파일이
+  이후 버전의 필터링된 결과와 섞여 업로더가 그대로 다 보내버리는 사고가 실기에서 실제로 났다
+  (다른 계정 리플레이 29건이 그대로 서버에 올라감). 업로더는 큐 폴더 안 파일의 소유자를 안
+  가리므로, `ReplayUploadService`가 스캔을 새로 시작할 때마다 폴더를 통째로 비우고 이번 결과로만
+  채워야 한다 - 진단(v6.8.2)으로 확인.
