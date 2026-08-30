@@ -919,3 +919,48 @@ vsync가 present를 막기 때문이다. 그런데 **가려진 창은 vsync에 �
   파이프·업데이트 프로바이더 환경변수 등으로 외부와 통신한다. 점수·판정·리플레이와 무관.
 - `ShutdownMode`를 검사 동안 `OnExplicitShutdown`으로 뒀다가 창을 띄우기 직전 `OnLastWindowClose`로
   되돌린다 — 안 그러면 창 없는 await 구간에서 앱이 살아있을 근거가 없다.
+
+---
+
+## 22. 리플레이 일괄 동기화 (2026-08-31 신규)
+
+Launcher의 "리플레이 동기화" 버튼 하나가 전부. 자체 리플레이 저장 서버(`http://68.183.226.182`,
+OsuScoreServer 프로젝트와 별개 프로세스)로 로컬 realm의 mania 리플레이를 올린다. 무덤/러브드 맵도
+포함 — osu! 공식 API는 `is_scoreable:false`인 맵의 점수를 사후 조회할 방법이 없어서(그 시점 실시간
+캡처만 가능), 로컬 realm이 아직 남아있을 때 통째로 퍼가는 것이 유일한 소급 경로다.
+
+| 파일 | 역할 |
+|---|---|
+| `LazerSR.Hook\HookRuntimeContext.cs` | 여러 패치가 얻은 `RealmAccess`/`Storage`를 공유 - 파이프 트리거 작업은 특정 Drawable 컨텍스트가 없어 직접 DI를 못 타므로 재사용한다. `DifficultyDisplayPatch`(송 셀렉트 로드, 가장 이른 시점)가 채운다 |
+| `LazerSR.Hook\ReplayUpload\ReplayUploadService.cs` | realm 전수 스캔(mania, `.osr` 있는 것만) → `LazerSrStorage.GetFolder("replayupload")`에 점수당 JSON 큐 파일(스키마 버전 1). **네트워크 없음, 읽기 + 로컬 쓰기만** |
+| `LazerSR.Launcher\Upload\ReplayUploader.cs` | 큐 폴더 폴링 → 서버에 `multipart/form-data`로 POST(`metadata` JSON + `.osr` 바이너리) → 성공/중복 시 큐 파일 삭제. `UpdateChecker`와 같은 방어적 패턴(모든 실패는 그 파일만 건너뛰고 앱을 막지 않음) |
+
+### 프로토콜 (파이프)
+
+```
+Launcher → Hook: replayupload:syncall
+Hook → Launcher: replayupload:queued:<N>   (큐에 N건 씀, Launcher가 이어서 업로드 시작)
+              또는 replayupload:notready    (RealmAccess/Storage 아직 미확보 - 송 셀렉트 뜨기 전)
+              또는 replayupload:error
+```
+
+### 서버 쪽 등록 (자동, 별도 UI 없음)
+
+큐 파일마다 `osu_username`(그 점수를 만든 `ScoreInfo.RealmUser.Username`)이 같이 들어있다. Launcher가
+API 키를 아직 저장하지 않았으면 **첫 큐 파일의 `osu_username`으로 `POST /api/v1/register`를 자동 호출**해
+키를 받아 `settings.json`(`ReplayServerApiKey`)에 저장한다 - 사람이 손으로 키를 발급/입력할 필요 없음.
+등록 자체엔 인증이 없다(악용 시도가 있을 만한 노출 경로가 아니라는 판단, 2026-08-31 논의).
+
+### 반드시 알아야 하는 것
+
+- **`calc_version`을 안 보낸다.** 로컬 realm 스캔 시점엔 sunny SR을 다시 굽지 않는다(비용 대비 이번
+  스코프 밖) - 서버 스펙상 `calc_version` 없는 기록은 랭킹에 안 쓰일 뿐 저장 자체는 된다.
+- **레드라인 2에 걸리지 않는 이유**: Hook은 realm을 읽고 로컬 파일만 쓴다. 네트워크 호출은 전부
+  Launcher(`ReplayUploader`)가 한다 - §21의 런처 예외와 같은 근거(프로세스 경계 문제이지 내용물 문제가
+  아님).
+- **파이프 응답 처리 시 `_` 변수명 충돌 주의**: `HandleConnectionAsync`가 이미 `using var _ = writer;`로
+  `_`를 점유하고 있어, 그 스코프 안에서 `_ = Task.Run(...)` 형태의 진짜 discard를 못 쓴다(컴파일 에러
+  CS1656). 그 스코프에서 fire-and-forget이 필요하면 그냥 `Task.Run(...)`만 쓴다(CS4014 경고는 감수).
+- **재시도는 서버의 `score_guid` idempotency에 기댄다.** 업로드 실패한 큐 파일은 삭제하지 않고 다음
+  "동기화" 클릭 때 다시 시도 - 이미 서버에 있는 것도 다시 보내지만 서버가 중복으로 무시하므로 로컬에
+  "이미 보냈다" 상태를 따로 추적하지 않는다.
