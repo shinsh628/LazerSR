@@ -21,10 +21,15 @@ internal static class ReplayUploadService
 {
     private const int SCHEMA_VERSION = 1;
 
+    /// <summary>진단용 - 원인 확정될 때까지만 존재. 무엇이 필터에 걸렸는지 눈으로 보기 위함.</summary>
+    public readonly record struct SyncDiagnostics(
+        int Written, int LocalUserId, string LocalUsername,
+        int ManiaWithReplaySeen, IReadOnlyList<string> DistinctRealmUsersSeen);
+
     /// <summary>
-    /// 성공하면 큐에 쓴 개수, realm/storage가 아직 준비 안 됐으면 null.
+    /// 성공하면 진단 정보, realm/storage/api가 아직 준비 안 됐으면 null.
     /// </summary>
-    public static int? EnqueueAllLocalMania()
+    public static SyncDiagnostics? EnqueueAllLocalMania()
     {
         var realm = HookRuntimeContext.Realm;
         var storage = HookRuntimeContext.Storage;
@@ -34,13 +39,13 @@ internal static class ReplayUploadService
         // 남의 리플레이를 인게임에서 열어보면 그것도 로컬 realm에 ScoreInfo로 남는다 - 지금
         // osu!에 로그인된 계정 것만 골라야 한다. 로그인 안 돼 있으면(오프라인/게스트) 아무것도 안 보낸다.
         int localUserId = api.LocalUser.Value.Id;
-        if (localUserId <= 0) return null;
-
-        string folder = LazerSrStorage.GetFolder("replayupload");
-        if (string.IsNullOrEmpty(folder)) return 0;
+        string localUsername = api.LocalUser.Value.Username;
+        if (localUserId <= 0) return new SyncDiagnostics(0, localUserId, localUsername, 0, Array.Empty<string>());
 
         var filesStorage = storage.GetStorageForDirectory("files");
         int written = 0;
+        int maniaWithReplaySeen = 0;
+        var distinctUsers = new HashSet<string>();
 
         realm.Run(r =>
         {
@@ -53,11 +58,15 @@ internal static class ReplayUploadService
                 try
                 {
                     if (score.Ruleset.OnlineID != 3) continue; // mania만
-                    if (score.RealmUser.OnlineID != localUserId) continue; // 남의 리플레이 제외
 
                     var replayFile = score.Files.FirstOrDefault(
                         f => f.Filename.EndsWith(".osr", StringComparison.OrdinalIgnoreCase));
                     if (replayFile == null) continue;
+
+                    maniaWithReplaySeen++;
+                    distinctUsers.Add($"{score.RealmUser.Username}(id={score.RealmUser.OnlineID})");
+
+                    if (score.RealmUser.OnlineID != localUserId) continue; // 남의 리플레이 제외
 
                     string replayPath = filesStorage.GetFullPath(replayFile.File.GetStoragePath());
                     if (!File.Exists(replayPath)) continue;
@@ -72,7 +81,7 @@ internal static class ReplayUploadService
             }
         });
 
-        return written;
+        return new SyncDiagnostics(written, localUserId, localUsername, maniaWithReplaySeen, distinctUsers.ToList());
     }
 
     private static bool WriteQueueEntry(ScoreInfo score, string replayPath)
