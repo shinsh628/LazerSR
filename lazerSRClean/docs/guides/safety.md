@@ -19,7 +19,7 @@ osu!는 커널 레벨 안티치트가 없고, `tosu`/`gosumemory`/`StreamCompani
 ## 절대 레드라인 (변경 없음)
 
 1. **osu!가 실제 사용하는 라이브 인스턴스(`Player`가 소유한 `ScoreProcessor`/`HealthProcessor`/`JudgementProcessor`, 실제 제출되는 `Score`/`Replay` 객체)에 절대 쓰지 않는다.** 읽기만 허용.
-2. **osu! 프로세스에서 외부로 나가는 네트워크 호출 절대 금지** (`HttpClient`, `Socket` 등). Named Pipe는 로컬 IPC이므로 해당 없음. — 이 레드라인은 **osu!에 주입되는 Hook 전용**이다. 별도 프로세스인 **런처**(`LazerSR.Launcher`)는 자동 업데이트 확인차 GitHub API를 호출한다(`architecture.md` §21). 점수·판정·리플레이와 무관하고 osu! 프로세스 밖이라 레드라인에 걸리지 않는다. 리플레이 자체를 서버로 올리는 것도 마찬가지 근거로 허용된다(`architecture.md` §22) — 레드라인의 경계는 **프로세스**(Hook vs 런처)이지 전송하는 값의 내용물이 아니다. Hook은 realm을 읽고 로컬 큐 파일만 쓸 뿐이고, 실제 업로드는 전부 런처가 한다.
+2. **osu! 프로세스에서 외부로 나가는 네트워크 호출 절대 금지** (`HttpClient`, `Socket` 등). Named Pipe는 로컬 IPC이므로 해당 없음. — 이 레드라인은 **osu!에 주입되는 Hook 전용**이다. 별도 프로세스인 **런처**(`LazerSR.Launcher`)는 자동 업데이트 확인차 GitHub API를 호출한다(`architecture.md` §21). 점수·판정·리플레이와 무관하고 osu! 프로세스 밖이라 레드라인에 걸리지 않는다.
 3. **osu! 파일(`client.realm`, `osu.cfg`, `.osu`, `.osr`)에 쓰지 않는다.** 읽기는 허용 (`RealmAccess`, `Storage` API 경유).
 4. **`BeatmapInfo.StarRating` 등 realm/DB 저장값에 쓰지 않는다.**
 

@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="LazerSR"
-        Height="230"
+        Height="200"
         Width="440"
         ResizeMode="CanMinimize"
         WindowStartupLocation="CenterScreen">
@@ -80,13 +80,6 @@
                   Margin="0,0,0,4"
                   Checked="SunnyPlusCheckBox_Toggled"
                   Unchecked="SunnyPlusCheckBox_Toggled"/>
-
-        <Button x:Name="ReplaySyncButton"
-                Content="리플레이 동기화"
-                HorizontalAlignment="Left"
-                Width="130"
-                Margin="0,4,0,0"
-                Click="ReplaySyncButton_Click"/>
 
     </StackPanel>
 </Window>

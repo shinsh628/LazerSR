@@ -36,9 +36,7 @@ public sealed class InstallPathProvider
     public LazerInstallLocation Save(string installPath)
     {
         Current = new LazerInstallLocation(installPath);
-        // 기존에 저장된 다른 필드(예: ReplayServerApiKey)를 지우지 않도록 불러온 값 위에 덮는다.
-        var existing = settingsStore.Load();
-        settingsStore.Save(existing with { OsuLazerInstallPath = Current.Path });
+        settingsStore.Save(new LauncherSettings(Current.Path));
         return Current;
     }
 

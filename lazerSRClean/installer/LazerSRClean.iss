@@ -1,5 +1,5 @@
 #define MyAppName "LazerSR"
-#define MyAppVersion "6.9.0"
+#define MyAppVersion "6.7.0"
 #define MyAppExeName "LazerSR.Launcher.exe"
 #define MyPublishDir "C:\dev\lazerSR\lazerSRClean\LazerSR.Launcher\bin\Release\net8.0-windows\win-x64\publish"
 

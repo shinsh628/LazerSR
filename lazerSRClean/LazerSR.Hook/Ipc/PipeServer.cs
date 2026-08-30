@@ -3,7 +3,6 @@ using System.IO;
 using System.IO.Pipes;
 using System.Threading;
 using System.Threading.Tasks;
-using LazerSR.Hook.ReplayUpload;
 using LazerSR.SunnyCalculator.Tuning;
 
 namespace LazerSR.Hook.Ipc;
@@ -115,8 +114,6 @@ public static class PipeServer
                         SetUniversalDiffEnabled(true);
                     else if (line == "sunnyplus:off")
                         SetUniversalDiffEnabled(false);
-                    else if (line == "replayupload:syncall")
-                        Task.Run(HandleReplayUploadSyncAll);
                 }
             }
             finally
@@ -137,21 +134,5 @@ public static class PipeServer
     {
         DiffCombiner.UniversalDiffEnabled = enabled;
         SunnyConstants.Reload();
-    }
-
-    // "일괄 리플레이 동기화" 버튼. 실제 네트워크는 안 함 - 로컬 realm을 훑어 큐 파일만 쓰고,
-    // 몇 건 썼는지(또는 아직 준비 안 됐는지)를 Launcher에 회신한다.
-    private static async Task HandleReplayUploadSyncAll()
-    {
-        try
-        {
-            int? count = ReplayUploadService.EnqueueAllLocalMania();
-            await BroadcastAsync(count == null ? "replayupload:notready" : $"replayupload:queued:{count}");
-        }
-        catch (Exception ex)
-        {
-            HookLog.Write($"[PipeServer] HandleReplayUploadSyncAll failed: {ex.Message}");
-            await BroadcastAsync("replayupload:error");
-        }
     }
 }
