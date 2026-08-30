@@ -964,3 +964,9 @@ API 키를 아직 저장하지 않았으면 **첫 큐 파일의 `osu_username`�
 - **재시도는 서버의 `score_guid` idempotency에 기댄다.** 업로드 실패한 큐 파일은 삭제하지 않고 다음
   "동기화" 클릭 때 다시 시도 - 이미 서버에 있는 것도 다시 보내지만 서버가 중복으로 무시하므로 로컬에
   "이미 보냈다" 상태를 따로 추적하지 않는다.
+- **로그인 계정 소유 스코어만 큐잉한다** (2026-08-31 v6.8.1). osu! 인게임에서 남의 리플레이를
+  다운로드해서 보면 그것도 로컬 realm에 평범한 `ScoreInfo`로 남는다 - `Ruleset.OnlineID == 3` 필터만
+  걸면 남의 것까지 같이 올라간다(실기에서 실제로 발생: 다른 유저 리플레이를 구경한 게 그 유저 계정
+  이름으로 서버에 올라감). `HookRuntimeContext.Api`(`IAPIProvider`, `DifficultyDisplayPatch`가 함께
+  stash)의 `LocalUser.Value.Id`와 `score.RealmUser.OnlineID`가 같은 것만 큐잉한다. 로그인 안 된 상태면
+  `notready`로 처리(아무것도 안 보냄) - 잘못 걸러지느니 아예 안 보내는 쪽이 안전하다.

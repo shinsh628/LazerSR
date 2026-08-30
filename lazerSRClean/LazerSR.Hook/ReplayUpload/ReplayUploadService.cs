@@ -28,7 +28,13 @@ internal static class ReplayUploadService
     {
         var realm = HookRuntimeContext.Realm;
         var storage = HookRuntimeContext.Storage;
-        if (realm == null || storage == null) return null;
+        var api = HookRuntimeContext.Api;
+        if (realm == null || storage == null || api == null) return null;
+
+        // 남의 리플레이를 인게임에서 열어보면 그것도 로컬 realm에 ScoreInfo로 남는다 - 지금
+        // osu!에 로그인된 계정 것만 골라야 한다. 로그인 안 돼 있으면(오프라인/게스트) 아무것도 안 보낸다.
+        int localUserId = api.LocalUser.Value.Id;
+        if (localUserId <= 0) return null;
 
         string folder = LazerSrStorage.GetFolder("replayupload");
         if (string.IsNullOrEmpty(folder)) return 0;
@@ -47,6 +53,7 @@ internal static class ReplayUploadService
                 try
                 {
                     if (score.Ruleset.OnlineID != 3) continue; // mania만
+                    if (score.RealmUser.OnlineID != localUserId) continue; // 남의 리플레이 제외
 
                     var replayFile = score.Files.FirstOrDefault(
                         f => f.Filename.EndsWith(".osr", StringComparison.OrdinalIgnoreCase));

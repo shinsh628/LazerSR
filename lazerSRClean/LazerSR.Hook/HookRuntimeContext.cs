@@ -1,10 +1,11 @@
 using osu.Framework.Platform;
 using osu.Game.Database;
+using osu.Game.Online.API;
 
 namespace LazerSR.Hook;
 
 /// <summary>
-/// 여러 패치가 각자 얻은 DI 의존성(RealmAccess/Storage) 중 가장 먼저 얻은 걸 공유한다.
+/// 여러 패치가 각자 얻은 DI 의존성(RealmAccess/Storage/IAPIProvider) 중 가장 먼저 얻은 걸 공유한다.
 /// 파이프로 트리거되는 백그라운드 작업(예: 리플레이 일괄 동기화)은 특정 Drawable 컨텍스트가
 /// 없어 직접 DI를 못 타므로, 이미 화면이 로드되며 자연스럽게 확보된 인스턴스를 여기서 재사용한다.
 /// <para>
@@ -16,10 +17,12 @@ internal static class HookRuntimeContext
 {
     public static RealmAccess? Realm { get; private set; }
     public static Storage? Storage { get; private set; }
+    public static IAPIProvider? Api { get; private set; }
 
-    public static void Populate(RealmAccess? realm, Storage? storage)
+    public static void Populate(RealmAccess? realm, Storage? storage, IAPIProvider? api = null)
     {
         if (realm != null) Realm ??= realm;
         if (storage != null) Storage ??= storage;
+        if (api != null) Api ??= api;
     }
 }

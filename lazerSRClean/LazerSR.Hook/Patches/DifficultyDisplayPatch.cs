@@ -79,7 +79,7 @@ public static class DifficultyDisplayPatch
             var realmAccess = deps?.Get(typeof(RealmAccess)) as RealmAccess;
             var apiProvider = deps?.Get(typeof(IAPIProvider)) as IAPIProvider;
             var storage = deps?.Get(typeof(osu.Framework.Platform.Storage)) as osu.Framework.Platform.Storage;
-            HookRuntimeContext.Populate(realmAccess, storage);
+            HookRuntimeContext.Populate(realmAccess, storage, apiProvider);
 
             void Recalculate()
             {
