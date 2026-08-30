@@ -11,17 +11,15 @@ namespace LazerSR.Launcher;
 public partial class MainWindow : Window
 {
     private readonly InstallPathProvider _installPathProvider;
-    private readonly LauncherSettingsStore _settingsStore;
     private PipeClient? _pipeClient;
     private Process? _osuProcess;
     private bool _replaySyncInFlight;
 
-    public MainWindow() : this(new InstallPathProvider(new LauncherSettingsStore()), new LauncherSettingsStore()) { }
+    public MainWindow() : this(new InstallPathProvider(new LauncherSettingsStore())) { }
 
-    public MainWindow(InstallPathProvider installPathProvider, LauncherSettingsStore settingsStore)
+    public MainWindow(InstallPathProvider installPathProvider)
     {
         _installPathProvider = installPathProvider;
-        _settingsStore = settingsStore;
         InitializeComponent();
         ApplyInstallLocation(_installPathProvider.Load());
     }
@@ -152,7 +150,7 @@ public partial class MainWindow : Window
             StatusTextBlock.Text = "업로드 시작...";
             try
             {
-                await ReplayUploader.SyncAsync(_settingsStore, status => Dispatcher.Invoke(() => StatusTextBlock.Text = status));
+                await ReplayUploader.SyncAsync(status => Dispatcher.Invoke(() => StatusTextBlock.Text = status));
             }
             finally
             {

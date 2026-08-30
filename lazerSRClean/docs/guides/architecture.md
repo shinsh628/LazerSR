@@ -944,12 +944,15 @@ Hook → Launcher: replayupload:queued:<N>   (큐에 N건 씀, Launcher가 이�
               또는 replayupload:error
 ```
 
-### 서버 쪽 등록 (자동, 별도 UI 없음)
+### 인증 없음 (2026-08-31 v6.9.0, API 키 완전 제거)
 
-큐 파일마다 `osu_username`(그 점수를 만든 `ScoreInfo.RealmUser.Username`)이 같이 들어있다. Launcher가
-API 키를 아직 저장하지 않았으면 **첫 큐 파일의 `osu_username`으로 `POST /api/v1/register`를 자동 호출**해
-키를 받아 `settings.json`(`ReplayServerApiKey`)에 저장한다 - 사람이 손으로 키를 발급/입력할 필요 없음.
-등록 자체엔 인증이 없다(악용 시도가 있을 만한 노출 경로가 아니라는 판단, 2026-08-31 논의).
+큐 파일마다 `osu_username`(그 점수를 만든 `ScoreInfo.RealmUser.Username`)이 이미 들어있고, 서버는
+`POST /api/v1/replays`에서 그 값을 그대로 신뢰해 유저를 찾거나 즉시 만든다(`get_or_create_user`,
+`db.py`) - 등록 절차도 키도 없다. 한 번 시도했던 API 키 방식(`/api/v1/register` + `X-Api-Key` +
+`settings.json`에 키 캐싱)은 **키가 최초 등록 시점의 유저네임에 영구히 고정돼, 이후 필터를 아무리
+정확히 고쳐도 서버에는 계속 잘못된 이름으로 기록되는 사고**로 이어져(§ 아래 "실기에서 겪은 것" 참고)
+전부 되돌렸다. 대신 값을 조작할 이유가 없는 폐쇄망(지인 몇 명, 서버 주소 비공개) 전제 하에 클라이언트가
+보내는 이름을 그냥 믿는다.
 
 ### 반드시 알아야 하는 것
 

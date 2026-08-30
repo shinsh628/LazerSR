@@ -13,23 +13,18 @@ using osu.Game.Scoring;
 namespace LazerSR.Hook.ReplayUpload;
 
 /// <summary>
-/// "일괄 리플레이 동기화" 버튼 하나가 트리거하는 전부. 로컬 realm에서 리플레이 파일이 붙은
-/// mania 점수를 전부 훑어 <see cref="LazerSrStorage"/> 큐 폴더에 메타데이터를 써둔다.
-/// 실제 업로드(네트워크)는 Launcher가 한다 — 여기는 읽기 + 로컬 쓰기만.
+/// "일괄 리플레이 동기화" 버튼 하나가 트리거하는 전부. 로컬 realm에서 지금 로그인된 계정 소유의
+/// 리플레이 파일 붙은 mania 점수를 전부 훑어 <see cref="LazerSrStorage"/> 큐 폴더에 메타데이터를
+/// 써둔다. 실제 업로드(네트워크)는 Launcher가 한다 — 여기는 읽기 + 로컬 쓰기만.
 /// </summary>
 internal static class ReplayUploadService
 {
     private const int SCHEMA_VERSION = 1;
 
-    /// <summary>진단용 - 원인 확정될 때까지만 존재. 무엇이 필터에 걸렸는지 눈으로 보기 위함.</summary>
-    public readonly record struct SyncDiagnostics(
-        int Written, int LocalUserId, string LocalUsername,
-        int ManiaWithReplaySeen, IReadOnlyList<string> DistinctRealmUsersSeen);
-
     /// <summary>
-    /// 성공하면 진단 정보, realm/storage/api가 아직 준비 안 됐으면 null.
+    /// 성공하면 큐에 쓴 개수, realm/storage/api가 아직 준비 안 됐으면 null.
     /// </summary>
-    public static SyncDiagnostics? EnqueueAllLocalMania()
+    public static int? EnqueueAllLocalMania()
     {
         var realm = HookRuntimeContext.Realm;
         var storage = HookRuntimeContext.Storage;
@@ -39,19 +34,14 @@ internal static class ReplayUploadService
         // 남의 리플레이를 인게임에서 열어보면 그것도 로컬 realm에 ScoreInfo로 남는다 - 지금
         // osu!에 로그인된 계정 것만 골라야 한다. 로그인 안 돼 있으면(오프라인/게스트) 아무것도 안 보낸다.
         int localUserId = api.LocalUser.Value.Id;
-        string localUsername = api.LocalUser.Value.Username;
-        if (localUserId <= 0) return new SyncDiagnostics(0, localUserId, localUsername, 0, Array.Empty<string>());
+        if (localUserId <= 0) return null;
 
-        // 매 동기화마다 큐를 통째로 비우고 이번 스캔 결과로만 새로 채운다. 예전(필터 없던 버전
-        // 등) 스캔이 남긴 다른 계정 소유 큐 파일이 이번 결과와 섞여 업로드되는 걸 원천 차단한다 -
-        // 업로더는 큐 폴더에 있는 걸 누구 것인지 안 가리고 다 보내기 때문에, 걸러진 채로 남는
-        // 게 없어야 한다.
+        // 매 동기화마다 큐를 통째로 비우고 이번 스캔 결과로만 새로 채운다 - 예전 큐 파일이
+        // 이번 결과와 섞여 업로드되는 걸 막는다.
         ClearQueue();
 
         var filesStorage = storage.GetStorageForDirectory("files");
         int written = 0;
-        int maniaWithReplaySeen = 0;
-        var distinctUsers = new HashSet<string>();
 
         realm.Run(r =>
         {
@@ -64,15 +54,11 @@ internal static class ReplayUploadService
                 try
                 {
                     if (score.Ruleset.OnlineID != 3) continue; // mania만
+                    if (score.RealmUser.OnlineID != localUserId) continue; // 남의 리플레이 제외
 
                     var replayFile = score.Files.FirstOrDefault(
                         f => f.Filename.EndsWith(".osr", StringComparison.OrdinalIgnoreCase));
                     if (replayFile == null) continue;
-
-                    maniaWithReplaySeen++;
-                    distinctUsers.Add($"{score.RealmUser.Username}(id={score.RealmUser.OnlineID})");
-
-                    if (score.RealmUser.OnlineID != localUserId) continue; // 남의 리플레이 제외
 
                     string replayPath = filesStorage.GetFullPath(replayFile.File.GetStoragePath());
                     if (!File.Exists(replayPath)) continue;
@@ -87,7 +73,7 @@ internal static class ReplayUploadService
             }
         });
 
-        return new SyncDiagnostics(written, localUserId, localUsername, maniaWithReplaySeen, distinctUsers.ToList());
+        return written;
     }
 
     private static void ClearQueue()

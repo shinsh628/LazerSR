@@ -145,19 +145,8 @@ public static class PipeServer
     {
         try
         {
-            var diag = ReplayUploadService.EnqueueAllLocalMania();
-            if (diag == null)
-            {
-                await BroadcastAsync("replayupload:notready");
-                return;
-            }
-
-            var d = diag.Value;
-            // 진단용(원인 확정될 때까지만): 내가 누구로 인식됐는지, realm에서 본 mania 리플레이
-            // 소유자들이 누구누구인지를 그대로 실어 보낸다.
-            string users = string.Join(",", d.DistinctRealmUsersSeen);
-            await BroadcastAsync(
-                $"replayupload:queued:{d.Written}:localId={d.LocalUserId}:localName={d.LocalUsername}:seen={d.ManiaWithReplaySeen}:users=[{users}]");
+            int? count = ReplayUploadService.EnqueueAllLocalMania();
+            await BroadcastAsync(count == null ? "replayupload:notready" : $"replayupload:queued:{count}");
         }
         catch (Exception ex)
         {
