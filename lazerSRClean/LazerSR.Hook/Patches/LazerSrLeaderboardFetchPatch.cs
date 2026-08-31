@@ -74,7 +74,9 @@ public static class LazerSrLeaderboardFetchPatch
             return;
         }
 
-        string md5 = beatmap.MD5Hash;
+        // 업로드가 저장한 것과 같은 값을 써야 한다: ScoreInfo.BeatmapHash == BeatmapInfo.Hash (SHA-256).
+        // 서버 컬럼 이름은 beatmap_md5지만 실제 내용은 이 해시다.
+        string beatmapHash = beatmap.Hash;
         string modsToken = toModsToken(criteria.ExactMods);
         int gen = ++generation;
 
@@ -83,7 +85,7 @@ public static class LazerSrLeaderboardFetchPatch
             string json;
             try
             {
-                json = await PipeServer.RequestAsync("lbreq", $"{md5}:{modsToken}", 10_000).ConfigureAwait(false);
+                json = await PipeServer.RequestAsync("lbreq", $"{beatmapHash}:{modsToken}", 10_000).ConfigureAwait(false);
             }
             catch (Exception e)
             {
