@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using System.Threading.Tasks;
 using HarmonyLib;
+using LazerSR.Hook.Ipc;
 using LazerSR.Hook.ReplayUpload;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics.Containers;
@@ -74,7 +75,11 @@ public static class ReplayAutoUploadPatch
                         return;
                     }
 
-                    ReplayQueueWriter.WriteEntry(scoreInfo, path);
+                    if (ReplayQueueWriter.WriteEntry(scoreInfo, path))
+                        // 런처에 "큐에 새 파일 있음" 통지 — 런처가 즉시 드레인해 서버로 올린다.
+                        // 파이프가 안 붙어 있으면(런처 없이 osu! 실행) 조용히 무시되고,
+                        // 다음 런처 시작 시 startup 드레인이 회수한다.
+                        await PipeServer.BroadcastAsync("replayqueued").ConfigureAwait(false);
                 }
                 catch (Exception e)
                 {

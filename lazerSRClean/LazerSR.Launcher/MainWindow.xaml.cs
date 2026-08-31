@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
-using System.Windows.Threading;
 using LazerSR.Launcher.Configuration;
 using LazerSR.Launcher.Ipc;
 using LazerSR.Launcher.Replay;
@@ -15,8 +14,6 @@ public partial class MainWindow : Window
     private PipeClient? _pipeClient;
     private Process? _osuProcess;
 
-    private FileSystemWatcher? _queueWatcher;
-    private readonly DispatcherTimer _drainDebounce;
     private bool _collectInFlight;
     private bool _syncInFlight;
 
@@ -28,20 +25,11 @@ public partial class MainWindow : Window
         InitializeComponent();
         ApplyInstallLocation(_installPathProvider.Load());
 
-        _drainDebounce = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
-        _drainDebounce.Tick += (_, _) =>
-        {
-            _drainDebounce.Stop();
-            _ = DrainQueueAndReportAsync(quiet: true);
-        };
-
         Loaded += async (_, _) =>
         {
-            StartQueueWatcher();
             await RefreshReplayCountAsync();
-            await DrainQueueAndReportAsync(quiet: true); // 지난 세션에 남은 큐 정리
+            await DrainQueueAndReportAsync(quiet: true); // 지난 세션에 남거나 런처 없이 친 판 회수
         };
-        Closed += (_, _) => _queueWatcher?.Dispose();
     }
 
     private void BrowseButton_Click(object sender, RoutedEventArgs e)
@@ -132,29 +120,6 @@ public partial class MainWindow : Window
 
     // ── 리플레이 저장 서버 ──────────────────────────────────────────────
 
-    private void StartQueueWatcher()
-    {
-        try
-        {
-            string dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "LazerSR", "replayupload");
-            Directory.CreateDirectory(dir);
-
-            _queueWatcher = new FileSystemWatcher(dir, "*.json") { EnableRaisingEvents = true };
-            // Hook이 매 게임 후 큐 파일을 떨구면(트리거 #2) 여기서 잡아 바로 업로드한다.
-            _queueWatcher.Created += (_, _) => Dispatcher.Invoke(() =>
-            {
-                _drainDebounce.Stop();
-                _drainDebounce.Start();
-            });
-        }
-        catch (Exception ex)
-        {
-            StatusTextBlock.Text = $"큐 감시 시작 실패: {ex.Message}";
-        }
-    }
-
     private async void CollectReplaysButton_Click(object sender, RoutedEventArgs e)
     {
         if (_collectInFlight) return;
@@ -174,6 +139,13 @@ public partial class MainWindow : Window
 
     private async void HandlePipeMessage(string line)
     {
+        // 트리거 #2 — Hook이 매 게임 후 큐 파일을 쓰고 이 신호를 쏜다. 바로 드레인해 서버로 올린다.
+        if (line == "replayqueued")
+        {
+            await DrainQueueAndReportAsync(quiet: false);
+            return;
+        }
+
         if (!line.StartsWith("replaycollect:")) return;
 
         string payload = line["replaycollect:".Length..];

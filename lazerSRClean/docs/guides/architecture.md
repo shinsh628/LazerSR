@@ -951,6 +951,12 @@ Hook은 네트워크를 안 쓴다(레드라인 2) — 큐 파일만 쓰고 업�
 별도 스레드에서 돌고 끝난 뒤 `score.ScoreInfo.Files`에 `.osr`이 붙으므로, Postfix는 `__result`
 Task를 기다린 뒤 파일이 디스크에 떨어질 때까지 짧게 재시도(150ms × 20)한다.
 
+큐 파일을 쓰고 나면 Hook이 파이프로 `replayqueued` 한 줄을 브로드캐스트하고, 런처가 그 자리에서
+드레인해 서버로 올린다 — **폴링·`FileSystemWatcher` 없음**. 파이프가 안 붙어 있으면(런처 없이
+osu! 실행) 신호는 무시되고 다음 런처 시작 시 startup 드레인이 회수한다. `FileSystemWatcher`는
+`LazerSrStorage.WriteText`가 임시파일 → `File.Move`로 교체하는 탓에 `Created`가 아니라 `Renamed`
+이벤트가 떠서 놓쳤다(2026-08-31 v6.10.0 버그, v6.10.1에서 파이프 통지로 교체).
+
 ### "남의 리플레이가 올라가던" 버그 (과거 미해결) — 이번 대책
 
 osu!는 랭킹창에서 남의 리플레이를 받아 로컬 realm에 그 사람 소유 `ScoreInfo`로 저장할 수 있다.
@@ -981,6 +987,6 @@ scores", 서버 쪽에서 해결됨)을 "0개 업로드, 29개 실패"로만 보
 | `LazerSR.Hook\ReplayUpload\OsrHeader.cs` | `.osr` 헤더 플레이어 이름 파서 |
 | `LazerSR.Hook\Patches\ReplayAutoUploadPatch.cs` | 트리거 2 — `Player.ImportScore` Postfix |
 | `LazerSR.Launcher\Replay\ReplayServerClient.cs` | 큐 드레인 + multipart 업로드 + `/api/v1/stats` 조회. 에러 그대로 노출 |
-| `LazerSR.Launcher\MainWindow.xaml(.cs)` | "리플레이 수집" 버튼 + "리플레이 N개 저장됨" 라벨 + 큐 폴더 `FileSystemWatcher`(트리거 2 자동 업로드) + 시작 시 잔여 큐 드레인 |
+| `LazerSR.Launcher\MainWindow.xaml(.cs)` | "리플레이 수집" 버튼 + "리플레이 N개 저장됨" 라벨 + 파이프 `replayqueued` 수신 시 즉시 드레인(트리거 2) + 시작 시 잔여 큐 드레인 |
 
 서버 스펙(엔드포인트/스키마)은 `C:\dev\LazerSrReplayServer\STATUS.md`.
