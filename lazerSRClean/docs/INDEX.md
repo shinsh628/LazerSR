@@ -57,6 +57,8 @@
 | `LazerSR.Hook\Ipc\PipeServer.cs` | Named Pipe 서버 (`sunny:on/off` + `replaycollect:scan` + ad-hoc 브로드캐스트) | 관리대상 |
 | `LazerSR.Hook\ReplayUpload\` | 리플레이 저장 서버 연동 (Hook 측) — realm 스캔·`.osr` 헤더 파서·큐 작성. 업로드는 안 함. `architecture.md` §22 | **관리대상** (2026-08-31 신규) |
 | `LazerSR.Hook\Patches\ReplayAutoUploadPatch.cs` | 매 실제 게임 종료 후 리플레이를 큐에 넣는 `Player.ImportScore` Postfix (§22) | 관리대상 (2026-08-31 신규) |
+| `LazerSR.Hook\LazerSrLeaderboard\` | 선곡 화면 "lazerSR" 리더보드 탭 — 상태·서버 JSON→ScoreInfo 변환·리플레이 감상. `architecture.md` §23 | **관리대상** (2026-08-31 신규) |
+| `LazerSR.Hook\Patches\LazerSrLeaderboard*Patch.cs` | 토글 버튼 삽입 / `FetchWithCriteria` 가로채기 / 다운로드 버튼 래핑 (§23) | 관리대상 (2026-08-31 신규) |
 | `LazerSR.Launcher\` | WPF 런처 EXE — osu! 실행 + Pipe 클라이언트 | **관리대상** |
 | `LazerSR.Launcher\Configuration\` | 설치 경로/설정 저장 | 관리대상 |
 | `LazerSR.Launcher\Update\` | GitHub Releases 기반 자동 업데이트 검사·다운로드 (`architecture.md` §21) | **관리대상** (2026-08-30 신규) |

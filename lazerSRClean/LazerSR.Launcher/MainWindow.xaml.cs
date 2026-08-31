@@ -146,6 +146,23 @@ public partial class MainWindow : Window
             return;
         }
 
+        // lazerSR 리더보드: Hook은 네트워크를 못 쓰므로 서버 조회를 런처가 대신한다.
+        if (line.StartsWith("lbreq:"))
+        {
+            var p = line.Split(':', 4);
+            if (p.Length >= 3)
+                _ = HandleLeaderboardRequestAsync(p[1], p[2], p.Length > 3 ? p[3] : "*");
+            return;
+        }
+
+        if (line.StartsWith("lbdl:"))
+        {
+            var p = line.Split(':', 3);
+            if (p.Length >= 3)
+                _ = HandleReplayDownloadRequestAsync(p[1], p[2]);
+            return;
+        }
+
         if (!line.StartsWith("replaycollect:")) return;
 
         string payload = line["replaycollect:".Length..];
@@ -173,6 +190,39 @@ public partial class MainWindow : Window
     {
         _collectInFlight = false;
         CollectReplaysButton.IsEnabled = true;
+    }
+
+    private async Task HandleLeaderboardRequestAsync(string reqId, string beatmapMd5, string modsToken)
+    {
+        try
+        {
+            string json = await ReplayServerClient.GetLeaderboardRawAsync(beatmapMd5, modsToken);
+            await SendPipeAsync($"lbreqok:{reqId}:{json}");
+        }
+        catch (Exception ex)
+        {
+            await SendPipeAsync($"lbreqerr:{reqId}:{ex.Message}");
+        }
+    }
+
+    private async Task HandleReplayDownloadRequestAsync(string reqId, string scoreGuid)
+    {
+        try
+        {
+            string path = await ReplayServerClient.DownloadReplayToCacheAsync(scoreGuid);
+            await SendPipeAsync($"lbdlok:{reqId}:{path}");
+        }
+        catch (Exception ex)
+        {
+            await SendPipeAsync($"lbdlerr:{reqId}:{ex.Message}");
+        }
+    }
+
+    private async Task SendPipeAsync(string line)
+    {
+        var client = _pipeClient;
+        if (client is { Status: PipeStatus.Connected })
+            await client.SendAsync(line);
     }
 
     private async Task DrainQueueAndReportAsync(bool quiet)

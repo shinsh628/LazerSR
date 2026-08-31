@@ -78,6 +78,7 @@ internal static class ReplayQueueWriter
                 schema_version,
                 score_guid = score.ID.ToString(),
                 osu_username = score.RealmUser.Username,
+                osu_user_id = score.RealmUser.OnlineID > 1 ? score.RealmUser.OnlineID : (int?)null,
                 beatmap_md5 = score.BeatmapHash,
                 played_at = score.Date.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                 mods = score.APIMods.Select(m => new { acronym = m.Acronym }).ToArray(),

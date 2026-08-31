@@ -172,6 +172,16 @@ osu!는 커널 레벨 안티치트가 없고, `tosu`/`gosumemory`/`StreamCompani
 Hook 전용이고, 런처는 이미 자동 업데이트로 GitHub API를 호출한다(§21과 동일 논리). 점수를 조작하지
 않고 있는 그대로 아카이빙하므로 "서버 제출값 무결성" 원칙에도 걸리지 않는다.
 
+### lazerSR 리더보드 탭 (2026-08-31, `architecture.md` §23)
+
+선곡 화면 리더보드를 우리 서버 내용으로 대체하는 기능. **네트워크는 여전히 Hook이 안 한다** —
+`PipeServer`의 요청/응답으로 런처가 서버 HTTP를 대신 친다. `LeaderboardManager.FetchWithCriteria`를
+**Prefix로 `return false`** 하는데, `LocalOnlyLeaderboardSkipPatch`와 같은 성격이다: 목적이 원본
+실행 자체를 막는 것이고, **리더보드 표시 상태만 읽고 쓰며 제출되는 점수·정확도·판정·리플레이
+어느 값도 읽거나 쓰지 않는다.** 다운로드한 `.osr`은 `ScoreManager.Import`로 realm에 들어가는데
+이건 사용자가 osu 리더보드에서 남의 리플레이를 받는 것과 동일한 경로(레드라인 3은 osu! 파일에
+**쓰지** 않는 것 — realm 임포트는 osu 자신의 API).
+
 ## 향후 리스크 대응
 
 ppy가 hook 탐지 로직을 추가할 가능성은 낮지만 0은 아니다 (`skin-widget-research.md` §14 — 코드 한 줄로 추가 가능하다고 평가됨). 만약 osu! 업데이트 노트나 커뮤니티에서 그런 조치가 확인되면:

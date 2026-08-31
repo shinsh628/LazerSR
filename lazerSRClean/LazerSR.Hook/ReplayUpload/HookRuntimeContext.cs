@@ -1,6 +1,9 @@
 using osu.Framework.Platform;
+using osu.Game.Beatmaps;
 using osu.Game.Database;
 using osu.Game.Online.API;
+using osu.Game.Rulesets;
+using osu.Game.Scoring;
 
 namespace LazerSR.Hook.ReplayUpload;
 
@@ -18,11 +21,19 @@ internal static class HookRuntimeContext
     public static RealmAccess? Realm { get; private set; }
     public static Storage? Storage { get; private set; }
     public static IAPIProvider? Api { get; private set; }
+    public static ScoreManager? ScoreManager { get; private set; }
+    public static BeatmapManager? BeatmapManager { get; private set; }
+    public static RulesetStore? Rulesets { get; private set; }
 
-    public static void Populate(RealmAccess? realm, Storage? storage, IAPIProvider? api)
+    public static void Populate(RealmAccess? realm, Storage? storage, IAPIProvider? api,
+                                ScoreManager? scoreManager = null, BeatmapManager? beatmapManager = null,
+                                RulesetStore? rulesets = null)
     {
         if (realm != null) Realm ??= realm;
         if (storage != null) Storage ??= storage;
         if (api != null) Api ??= api;
+        if (scoreManager != null) ScoreManager ??= scoreManager;
+        if (beatmapManager != null) BeatmapManager ??= beatmapManager;
+        if (rulesets != null) Rulesets ??= rulesets;
     }
 }

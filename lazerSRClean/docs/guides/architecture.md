@@ -990,3 +990,58 @@ scores", 서버 쪽에서 해결됨)을 "0개 업로드, 29개 실패"로만 보
 | `LazerSR.Launcher\MainWindow.xaml(.cs)` | "리플레이 수집" 버튼 + "리플레이 N개 저장됨" 라벨 + 파이프 `replayqueued` 수신 시 즉시 드레인(트리거 2) + 시작 시 잔여 큐 드레인 |
 
 서버 스펙(엔드포인트/스키마)은 `C:\dev\LazerSrReplayServer\STATUS.md`.
+
+---
+
+## 23. lazerSR 리더보드 탭 (2026-08-31 신규, v6.11.0)
+
+선곡 화면 좌측 리더보드에 **"lazerSR" 토글 버튼**을 추가한다. 켜면 우리 서버(`68.183.226.182`)에
+쌓인 그 맵의 **모든 리플레이**를 osu 리더보드 파이프라인 그대로 띄운다 — 무덤·러브드·미제출 맵
+포함(osu의 로그인/OnlineID/Status/서포터 게이트를 전부 우회). 점수 클릭 → 결과창 → 리플레이
+다운로드/감상까지 osu 네이티브 흐름.
+
+### 파이프 요청/응답 (신규)
+
+Hook은 네트워크 금지라 서버 조회를 **런처가 대신**한다. `PipeServer`에 요청/응답 상관(reqId +
+`TaskCompletionSource`) 인프라를 추가:
+
+```
+Hook ─ lbreq:<reqId>:<md5>:<modsToken> ─→ Launcher ─HTTP GET /api/v1/leaderboard─→ 서버
+Hook ←─ lbreqok:<reqId>:<json> / lbreqerr:<reqId>:<msg> ─ Launcher
+Hook ─ lbdl:<reqId>:<guid> ─→ Launcher ─HTTP GET /api/v1/replays/{guid}.osr─→ 서버
+Hook ←─ lbdlok:<reqId>:<로컬 .osr 경로> / lbdlerr:<reqId>:<msg> ─ Launcher
+```
+modsToken: `*`=필터 없음 / `-`=모드 없는 기록만 / `DT,HD`=그 세트 정확히 일치 (osu `FilterBySelectedMods` 의미 그대로).
+
+### 패치 (osu 소스 0줄 수정)
+
+| 파일 | 타겟 | 방식 |
+|---|---|---|
+| `Patches/LazerSrLeaderboardTogglePatch.cs` | `BeatmapDetailsArea+Header.LoadComplete` (Postfix) | `leaderboardControls`에 `ShearedToggleButton` 삽입, `Active` ↔ `LazerSrLeaderboardState.Enabled`(GetBoundCopy + `ConditionalWeakTable`로 수명 관리), ON이면 scope 드롭다운 `Current.Disabled = true` + `BeatmapDetailsArea.Refresh()` |
+| `Patches/LazerSrLeaderboardFetchPatch.cs` | `LeaderboardManager.FetchWithCriteria` (**Prefix, `return false`**) | 토글 ON이면 원본 스킵. `CurrentCriteria`(리플렉션 setter) 세팅 → 파이프로 서버 조회 → `LazerSrScoreFactory`로 `ScoreInfo[]` 변환 → `manager.Scheduler`로 `Scores.Value = LeaderboardScores.Success(...)`. mania 아니면 `RulesetUnavailable`, 실패면 `NetworkFailure`. `generation` 카운터로 stale 결과 무시 |
+| `Patches/LazerSrReplayDownloadPatch.cs` | `ReplayDownloadButton.load` (Postfix) | 버튼이 우리 스코어(`Hash`가 `lazersr:` 접두)를 가리키면 `button.Action`을 래핑해 `LazerSrReplayFetcher.Watch`로. 그 외는 osu 원본 |
+
+Prefix `return false` 정당화: `LocalOnlyLeaderboardSkipPatch` 선례와 동일 — 리더보드 표시 상태만
+읽고 쓰며 제출되는 점수·판정·리플레이 값에 손대지 않음.
+
+### 지원 코드
+
+| 파일 | 역할 |
+|---|---|
+| `LazerSrLeaderboard/LazerSrLeaderboardState.cs` | 토글 on/off, 세션 간 유지 (`%LocalAppData%\LazerSR\leaderboard\enabled`) |
+| `LazerSrLeaderboard/LazerSrScoreFactory.cs` | 서버 JSON row → `ScoreInfo`. `Hash = "lazersr:{guid}"` 마커, `HasOnlineReplay = true`, 유저는 `RealmUser{OnlineID, Username}`(아바타는 id로 자동, 국기 없음) |
+| `LazerSrLeaderboard/LazerSrReplayFetcher.cs` | 감상 요청 시 파이프로 `.osr` 받아 `ScoreManager.Import` → `OsuGame.PresentScore(Gameplay)` (G-1: `ScoreDownloadTracker` 상태머신 안 거침) |
+
+### 서버 (`LazerSrReplayServer`)
+
+- `GET /api/v1/leaderboard?beatmap_md5=<hash>&mods=<옵션>` → `{"scores":[...]}`, `total_score` desc, 인증 없음
+- `GET /api/v1/replays/<guid>.osr` → raw `.osr`
+- `users.osu_user_id` 컬럼 추가(업로드 메타 `osu_user_id`로 채움, 아바타 조회용)
+- 저장은 인덱스 `idx_scores_leaderboard (beatmap_md5, total_score DESC)` 하나 — 별도 materialized 테이블 없음(10만 행에서 조인+정렬 1ms 미만)
+
+### 알려진 성질 / 미검증
+
+- `pp`/`sr`은 전부 `null`(lazerSR 재계산 안 함) — 리더보드 행 pp 칸 빈 채로 표시
+- 국기 없음 (유저 id만으로는 안 나옴, 의도적 생략)
+- 다운로드 후 `ScoreDownloadTracker`가 realm 매칭을 못 해 버튼이 "download" 상태로 남음(G-1) — 재클릭 시 재임포트(osu importer가 파일 해시로 멱등)
+- osu 안에서의 실제 동작(패치 발동, 파이프 왕복, 결과창 진입)은 빌드/정적 검증만 — 실사용 QA 필요

@@ -37,6 +37,36 @@ public static class ReplayServerClient
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "LazerSR", "replayupload");
 
+    /// <summary>
+    /// lazerSR 리더보드 원본 JSON. Hook이 파이프로 요청하면 런처가 대신 친다(Hook은 네트워크 금지).
+    /// <paramref name="modsToken"/>: <c>*</c>=필터 없음, <c>-</c>=모드 없는 기록만, <c>DT,HD</c>=그 세트.
+    /// </summary>
+    public static async Task<string> GetLeaderboardRawAsync(string beatmapMd5, string modsToken)
+    {
+        string url = $"{BaseUrl}/api/v1/leaderboard?beatmap_md5={Uri.EscapeDataString(beatmapMd5)}";
+
+        if (modsToken == "-")
+            url += "&mods=";
+        else if (modsToken != "*")
+            url += "&mods=" + Uri.EscapeDataString(modsToken);
+
+        return await http.GetStringAsync(url);
+    }
+
+    /// <summary>서버에서 <c>.osr</c>을 받아 <c>%LocalAppData%\LazerSR\replaycache\</c>에 저장하고 그 경로를 돌려준다.</summary>
+    public static async Task<string> DownloadReplayToCacheAsync(string scoreGuid)
+    {
+        string dir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "LazerSR", "replaycache");
+        Directory.CreateDirectory(dir);
+
+        string path = Path.Combine(dir, $"{scoreGuid}.osr");
+        byte[] bytes = await http.GetByteArrayAsync($"{BaseUrl}/api/v1/replays/{scoreGuid}.osr");
+        await File.WriteAllBytesAsync(path, bytes);
+        return path;
+    }
+
     /// <summary>서버에 저장된 리플레이 총 개수. 실패하면 null.</summary>
     public static async Task<int?> GetReplayCountAsync()
     {

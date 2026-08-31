@@ -79,7 +79,10 @@ public static class DifficultyDisplayPatch
             var realmAccess = deps?.Get(typeof(RealmAccess)) as RealmAccess;
             var apiProvider = deps?.Get(typeof(IAPIProvider)) as IAPIProvider;
             var storage = deps?.Get(typeof(osu.Framework.Platform.Storage)) as osu.Framework.Platform.Storage;
-            ReplayUpload.HookRuntimeContext.Populate(realmAccess, storage, apiProvider);
+            var scoreManager = deps?.Get(typeof(osu.Game.Scoring.ScoreManager)) as osu.Game.Scoring.ScoreManager;
+            var beatmapManager = deps?.Get(typeof(BeatmapManager)) as BeatmapManager;
+            var rulesetStore = deps?.Get(typeof(RulesetStore)) as RulesetStore;
+            ReplayUpload.HookRuntimeContext.Populate(realmAccess, storage, apiProvider, scoreManager, beatmapManager, rulesetStore);
 
             void Recalculate()
             {
