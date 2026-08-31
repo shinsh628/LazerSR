@@ -71,15 +71,18 @@ namespace osu.Game.Rulesets.Mania.Difficulty.Skills
             // Short map nerf
             double scaled = rawDifficulty * weightedNoteCount / (weightedNoteCount + 60.0);
 
-            // Temporary nerf for the shifted constant set. Must run before the high-end rescale below.
-            scaled = SunnyTempNerf.Apply(scaled);
-
-            // Adjust high-end star ratings slightly
-            // 임시 비활성화 — 상수 조정 중 고SR 억제를 뺀 값을 보기 위함. 되살릴 때는 아래 주석만 풀면 된다.
-            // if (scaled > rescale_high_threshold)
-            // {
-            //     scaled = rescale_high_threshold + (scaled - rescale_high_threshold) / rescale_high_factor;
-            // }
+            // 시프트된 상수 세트(만인 sunny+ 활성 또는 개인화 격리 스코프)에서만 커스텀 억제를 탄다.
+            // 체크박스를 꺼서 스톡 sunny로 돌아온 경우엔 바닐라 파이프라인 그대로 — 고SR rescale.
+            if (DiffCombiner.UniversalDiffEnabled || SunnyConstants.IsIsolatedScopeActive)
+            {
+                // Temporary nerf for the shifted constant set. Must run before the high-end rescale.
+                scaled = SunnyTempNerf.Apply(scaled);
+            }
+            else if (scaled > rescale_high_threshold)
+            {
+                // Adjust high-end star ratings slightly (stock sunny)
+                scaled = rescale_high_threshold + (scaled - rescale_high_threshold) / rescale_high_factor;
+            }
 
             return scaled;
         }
