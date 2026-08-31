@@ -81,7 +81,13 @@ internal static class ReplayQueueWriter
                 osu_user_id = score.RealmUser.OnlineID > 1 ? score.RealmUser.OnlineID : (int?)null,
                 beatmap_md5 = score.BeatmapHash,
                 played_at = score.Date.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                mods = score.APIMods.Select(m => new { acronym = m.Acronym }).ToArray(),
+                mods = score.APIMods.Select(m => new
+                {
+                    acronym = m.Acronym,
+                    // 세부설정(speed_change, adjust_pitch, DA 조정값 등)까지 보존한다.
+                    // 비어 있으면 키 생략 — osu APIMod.ShouldSerializeSettings 동작과 동일.
+                    settings = m.Settings.Count > 0 ? m.Settings : null,
+                }).ToArray(),
                 rate = GetSpeedChange(score.APIMods) ?? 1.0,
                 passed = score.Passed,
                 rank = score.Rank.ToString(),

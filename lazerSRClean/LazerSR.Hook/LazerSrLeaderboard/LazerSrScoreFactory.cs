@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using osu.Game.Beatmaps;
 using osu.Game.Models;
+using osu.Game.Online.API;
 using osu.Game.Rulesets;
 using osu.Game.Rulesets.Mods;
 using osu.Game.Rulesets.Scoring;
@@ -96,21 +97,74 @@ internal static class LazerSrScoreFactory
         if (row.TryGetProperty("pp", out var pp) && pp.ValueKind == JsonValueKind.Number)
             score.PP = pp.GetDouble();
 
-        var mods = new List<Mod>();
-        if (row.TryGetProperty("mods", out var modArr) && modArr.ValueKind == JsonValueKind.Array)
+        score.Mods = parseMods(row, mania);
+
+        return score;
+    }
+
+    /// <summary>
+    /// 서버가 주는 <c>mods_detailed</c>(osu <see cref="APIMod"/> 원형: <c>{acronym, settings}</c>)를
+    /// 우선 읽어 세부설정(speed_change 등)까지 복원한다. 구 서버 호환으로 문자열 배열 <c>mods</c>도 받는다.
+    /// </summary>
+    private static Mod[] parseMods(JsonElement row, Ruleset mania)
+    {
+        var apiMods = new List<APIMod>();
+
+        if (row.TryGetProperty("mods_detailed", out var detailed) && detailed.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var m in detailed.EnumerateArray())
+            {
+                if (m.ValueKind != JsonValueKind.Object) continue;
+                if (!m.TryGetProperty("acronym", out var acrEl)) continue;
+                string? acr = acrEl.GetString();
+                if (string.IsNullOrEmpty(acr)) continue;
+
+                var api = new APIMod { Acronym = acr };
+                if (m.TryGetProperty("settings", out var settings) && settings.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var prop in settings.EnumerateObject())
+                    {
+                        object? value = unwrap(prop.Value);
+                        if (value != null) api.Settings[prop.Name] = value;
+                    }
+                }
+                apiMods.Add(api);
+            }
+        }
+        else if (row.TryGetProperty("mods", out var modArr) && modArr.ValueKind == JsonValueKind.Array)
         {
             foreach (var m in modArr.EnumerateArray())
             {
                 string? acr = m.GetString();
-                if (string.IsNullOrEmpty(acr)) continue;
-                var mod = mania.CreateModFromAcronym(acr);
-                if (mod != null) mods.Add(mod);
+                if (!string.IsNullOrEmpty(acr)) apiMods.Add(new APIMod { Acronym = acr });
             }
         }
-        score.Mods = mods.ToArray();
 
-        return score;
+        var mods = new List<Mod>();
+        foreach (var api in apiMods)
+        {
+            try
+            {
+                var mod = api.ToMod(mania);
+                if (mod is not null and not UnknownMod) mods.Add(mod);
+            }
+            catch (Exception e)
+            {
+                HookLog.Write($"[LazerSR] LazerSrScoreFactory: mod '{api.Acronym}' skipped: {e}");
+            }
+        }
+        return mods.ToArray();
     }
+
+    /// <summary><see cref="JsonElement"/> 설정값을 <see cref="APIMod.Settings"/>가 받는 CLR 타입으로.</summary>
+    private static object? unwrap(JsonElement el) => el.ValueKind switch
+    {
+        JsonValueKind.Number => el.GetDouble(),
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        JsonValueKind.String => el.GetString(),
+        _ => null,
+    };
 
     private static long getLong(JsonElement row, string name) =>
         row.TryGetProperty(name, out var e) && e.ValueKind == JsonValueKind.Number ? e.GetInt64() : 0;

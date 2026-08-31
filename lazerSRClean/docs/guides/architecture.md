@@ -1043,5 +1043,10 @@ Prefix `return false` 정당화: `LocalOnlyLeaderboardSkipPatch` 선례와 동�
 
 - `pp`/`sr`은 전부 `null`(lazerSR 재계산 안 함) — 리더보드 행 pp 칸 빈 채로 표시
 - 국기 없음 (유저 id만으로는 안 나옴, 의도적 생략)
+- **모드 세부설정 미표시 (부분 해결, 2026-08-31)**: 업로드(`ReplayQueueWriter.cs:84`)가 `m.Acronym`만
+  보내 DT 1.2배속이 깡 DT로 보였음. 서버는 응답에 `mods_detailed`(osu `APIMod[]` 원형) 추가 완료 +
+  기존 lazer `.osr` 1,177건 백필 완료(상세 `LazerSrReplayServer\STATUS.md`). **클라 측 2곳 미착수**:
+  `ReplayQueueWriter`가 `m.Settings` 직렬화 / `LazerSrScoreFactory`가 `mods_detailed`→`APIMod.ToMod()`.
+  이 둘이 되면 osu 네이티브 `ModIcon` 확장정보(`1.20x` 플레이트)가 자동으로 뜬다.
 - 다운로드 후 `ScoreDownloadTracker`가 realm 매칭을 못 해 버튼이 "download" 상태로 남음(G-1) — 재클릭 시 재임포트(osu importer가 파일 해시로 멱등)
 - osu 안에서의 실제 동작(패치 발동, 파이프 왕복, 결과창 진입)은 빌드/정적 검증만 — 실사용 QA 필요

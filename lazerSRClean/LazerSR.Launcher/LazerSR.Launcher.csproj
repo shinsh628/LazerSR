@@ -13,7 +13,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- 로컬 폴백 빌드용 기본 버전. CI는 태그에서 /p:Version=... 로 덮어쓴다 (docs\end.md 참고). -->
-    <Version>6.11.2</Version>
+    <Version>6.11.3</Version>
   </PropertyGroup>
 
   <ItemGroup>
