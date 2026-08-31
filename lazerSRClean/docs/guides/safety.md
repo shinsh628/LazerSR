@@ -161,6 +161,17 @@ osu!는 커널 레벨 안티치트가 없고, `tosu`/`gosumemory`/`StreamCompani
 
 `SectionPracticeClockContainer`가 시작 시 트랙의 tempo/frequency 조정을 초기화한다(`architecture.md` §15). **오디오 재생 파라미터일 뿐 점수·정확도·판정·리플레이 어디에도 닿지 않는다.** 라이브 `ScoreProcessor`에 쓰는 코드는 없다.
 
+## 리플레이 저장 서버 연동 (2026-08-31)
+
+`Patches/ReplayAutoUploadPatch.cs`(`Player.ImportScore` Postfix)와 `ReplayUpload/`는 **이미 완성된
+`Score`/`ScoreInfo`와 그 `.osr` 파일을 읽어** 큐 폴더(`%LocalAppData%\LazerSR\replayupload\`)에
+메타데이터를 쓰는 것뿐이다 — 점수·리플레이·realm 어디에도 쓰지 않고, **네트워크 호출도 없다.**
+`PersonalSunnyScoreCollectorPatch`와 완전히 같은 성격(같은 타겟, 같은 "완성된 값만 읽기").
+
+실제 업로드(HTTP)는 **런처**(`LazerSR.Launcher\Replay\ReplayServerClient.cs`)가 한다 — 레드라인 2는
+Hook 전용이고, 런처는 이미 자동 업데이트로 GitHub API를 호출한다(§21과 동일 논리). 점수를 조작하지
+않고 있는 그대로 아카이빙하므로 "서버 제출값 무결성" 원칙에도 걸리지 않는다.
+
 ## 향후 리스크 대응
 
 ppy가 hook 탐지 로직을 추가할 가능성은 낮지만 0은 아니다 (`skin-widget-research.md` §14 — 코드 한 줄로 추가 가능하다고 평가됨). 만약 osu! 업데이트 노트나 커뮤니티에서 그런 조치가 확인되면:

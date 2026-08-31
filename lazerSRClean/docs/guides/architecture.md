@@ -49,7 +49,7 @@ public class StartupHook  // global namespace 필수
 
 ## 4. 실제 존재하는 패치 (2026-07-17 기준, 코드로 직접 확인)
 
-과거 설계원칙 문서는 "정확히 2개, 전부 `Select.*`의 `LoadComplete`"라고 서술했으나 **틀렸다.** 실제로는 18개(2026-08-21 기준):
+과거 설계원칙 문서는 "정확히 2개, 전부 `Select.*`의 `LoadComplete`"라고 서술했으나 **틀렸다.** 실제로는 19개(2026-08-31 기준):
 
 | 파일 | 타겟 | 방식 |
 |---|---|---|
@@ -69,6 +69,7 @@ public class StartupHook  // global namespace 필수
 | `Patches/PersonalSunnyScoreCollectorPatch.cs` | `Player.ImportScore` (2026-08-19 추가) | 실제 개인 스코어가 생성될 때 개인화diff 큐에 자동 적재. 읽기 전용 — `Score`의 이미 완성된 필드만 읽는다 (§17) |
 | `Patches/PersonalSunnyGameplayActivityPatch.cs`(패치 3개: Enter/Suspend/Exit) | `Player.LoadComplete`/`OnSuspending`/`OnExiting` (2026-08-20 추가) | `PersonalSunnyService.GameplayActive` static bool만 갱신 — `__instance`도 안 읽고 `OnExiting`의 `bool` 리턴값도 안 건드림. 개인화diff 백그라운드 워커가 게임플레이 중 동시성을 낮추기 위한 신호일 뿐 (§17) |
 | `Patches/PatternCopyMenuButtonPatch.cs` | `ButtonSystem.load` (**BDL 메서드**, 2026-08-21 추가) | 메인 메뉴 **편집** 서브메뉴에 '패턴 복제' 버튼 추가 (§19) |
+| `Patches/ReplayAutoUploadPatch.cs` | `Player.ImportScore` (2026-08-31 추가) | 실제 게임 종료 시 방금 친 mania 리플레이를 저장 서버 큐에 적재. 읽기 전용 — 완성된 `Score`와 `.osr` 파일만 읽고, 네트워크는 안 함(§22) |
 
 `Select.*`/`LoadComplete` 제약은 존재하는 패턴의 다수를 설명하지만 전부는 아니다. 새 패치를 만들 때 이 제약에 얽매이지 말고 §안전 가이드(`safety.md`)의 실제 레드라인을 따를 것.
 
@@ -919,3 +920,67 @@ vsync가 present를 막기 때문이다. 그런데 **가려진 창은 vsync에 �
   파이프·업데이트 프로바이더 환경변수 등으로 외부와 통신한다. 점수·판정·리플레이와 무관.
 - `ShutdownMode`를 검사 동안 `OnExplicitShutdown`으로 뒀다가 창을 띄우기 직전 `OnLastWindowClose`로
   되돌린다 — 안 그러면 창 없는 await 구간에서 앱이 살아있을 근거가 없다.
+
+---
+
+## 22. 리플레이 저장 서버 연동 (2026-08-31 신규)
+
+로컬에서 친 mania 리플레이(`.osr`)를 자체 서버(`C:\dev\LazerSrReplayServer`, DigitalOcean
+`68.183.226.182`, HTTP만)에 영구 저장한다. osu! 공식 API로는 무덤/러브드 맵 점수를 사후 조회할 수
+없어서, 그 순간의 리플레이를 잡아두는 게 유일한 방법이기 때문. **인증 없음** — 리플레이 메타데이터의
+`osu_username`을 그대로 신뢰한다(키 방식은 2026-08-31 이전 시도에서 폐기, 등록 시점 유저네임에
+영구 고정되는 구조적 문제).
+
+```
+[Hook] realm 스캔 / ImportScore Postfix
+    ↓  %LocalAppData%\LazerSR\replayupload\{score_guid}.json  (메타데이터 + .osr 절대경로)
+[Launcher] 큐 드레인 → multipart POST /api/v1/replays
+```
+
+Hook은 네트워크를 안 쓴다(레드라인 2) — 큐 파일만 쓰고 업로드는 런처가 한다.
+
+### 트리거 2개
+
+| # | 진입점 | 파일 | 소유권 |
+|---|---|---|---|
+| 1 | 런처 "리플레이 수집" 버튼 → 파이프 `replaycollect:scan` | `Ipc/PipeServer.cs` → `ReplayUpload/ReplayCollectService.cs` | realm 전체 스캔이라 **2중 검사** 필요 |
+| 2 | 매 실제 게임 종료 후 `Player.ImportScore` Postfix | `Patches/ReplayAutoUploadPatch.cs` | `Score`가 로그인 유저의 방금 친 판이라 **검사 불필요** |
+
+트리거 2는 `PersonalSunnyScoreCollectorPatch`와 같은 타겟·같은 논리 — `ReplayPlayer`/훈련/구간연습/
+패턴복제 `Player`는 `ImportScore`를 `base` 호출 없이 override하므로 자동 제외. `ImportScore` 본문이
+별도 스레드에서 돌고 끝난 뒤 `score.ScoreInfo.Files`에 `.osr`이 붙으므로, Postfix는 `__result`
+Task를 기다린 뒤 파일이 디스크에 떨어질 때까지 짧게 재시도(150ms × 20)한다.
+
+### "남의 리플레이가 올라가던" 버그 (과거 미해결) — 이번 대책
+
+osu!는 랭킹창에서 남의 리플레이를 받아 로컬 realm에 그 사람 소유 `ScoreInfo`로 저장할 수 있다.
+트리거 1의 벌크 스캔은 이걸 걸러야 한다. **두 검사를 모두 통과해야 큐에 넣는다**:
+
+1. `ScoreInfo.RealmUser.OnlineID == api.LocalUser.Value.Id` (且 `Id > 1` — 게스트/오프라인 배제)
+2. `.osr` 헤더에 박힌 플레이어 이름 == 로그인 유저네임 (`ReplayUpload/OsrHeader.cs`가
+   `byte mode · int32 version · string md5 · string playerName`만 파싱). 파싱 실패·불일치는
+   전부 제외 — 애매하면 안 올린다.
+
+추가로 `ReplayQueueWriter.ClearQueue()`가 매 스캔 시작에 큐를 통째로 비운다 — 런처는 큐 폴더
+내용을 소유자 구분 없이 다 올리므로, 이전 스캔이 남긴 파일이 섞이면 안 된다(과거 버그의
+직접 원인 중 하나).
+
+### 에러 가시성
+
+`ReplayServerClient.DrainQueueAsync`는 실패 시 **HTTP 상태코드 + 응답 본문**을 그대로 런처
+상태줄에 노출한다. 이전 구현은 전부 `catch { return false }`로 삼켜서 서버 500("no such table:
+scores", 서버 쪽에서 해결됨)을 "0개 업로드, 29개 실패"로만 보이게 했다.
+
+### 파일
+
+| 파일 | 역할 |
+|---|---|
+| `LazerSR.Hook\ReplayUpload\HookRuntimeContext.cs` | 파이프 트리거 벌크 스캔용 `RealmAccess`/`Storage`/`IAPIProvider` 공유(선곡 화면 패치가 채움) |
+| `LazerSR.Hook\ReplayUpload\ReplayQueueWriter.cs` | 큐 엔트리 작성 + `.osr` 경로 해결 + `ClearQueue`. 두 트리거 공용 |
+| `LazerSR.Hook\ReplayUpload\ReplayCollectService.cs` | 트리거 1 — realm 벌크 스캔 + 2중 소유권 검사 |
+| `LazerSR.Hook\ReplayUpload\OsrHeader.cs` | `.osr` 헤더 플레이어 이름 파서 |
+| `LazerSR.Hook\Patches\ReplayAutoUploadPatch.cs` | 트리거 2 — `Player.ImportScore` Postfix |
+| `LazerSR.Launcher\Replay\ReplayServerClient.cs` | 큐 드레인 + multipart 업로드 + `/api/v1/stats` 조회. 에러 그대로 노출 |
+| `LazerSR.Launcher\MainWindow.xaml(.cs)` | "리플레이 수집" 버튼 + "리플레이 N개 저장됨" 라벨 + 큐 폴더 `FileSystemWatcher`(트리거 2 자동 업로드) + 시작 시 잔여 큐 드레인 |
+
+서버 스펙(엔드포인트/스키마)은 `C:\dev\LazerSrReplayServer\STATUS.md`.

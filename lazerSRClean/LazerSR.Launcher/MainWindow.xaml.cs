@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using LazerSR.Launcher.Configuration;
 using LazerSR.Launcher.Ipc;
+using LazerSR.Launcher.Replay;
 using Microsoft.Win32;
 
 namespace LazerSR.Launcher;
@@ -13,6 +15,11 @@ public partial class MainWindow : Window
     private PipeClient? _pipeClient;
     private Process? _osuProcess;
 
+    private FileSystemWatcher? _queueWatcher;
+    private readonly DispatcherTimer _drainDebounce;
+    private bool _collectInFlight;
+    private bool _syncInFlight;
+
     public MainWindow() : this(new InstallPathProvider(new LauncherSettingsStore())) { }
 
     public MainWindow(InstallPathProvider installPathProvider)
@@ -20,6 +27,21 @@ public partial class MainWindow : Window
         _installPathProvider = installPathProvider;
         InitializeComponent();
         ApplyInstallLocation(_installPathProvider.Load());
+
+        _drainDebounce = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+        _drainDebounce.Tick += (_, _) =>
+        {
+            _drainDebounce.Stop();
+            _ = DrainQueueAndReportAsync(quiet: true);
+        };
+
+        Loaded += async (_, _) =>
+        {
+            StartQueueWatcher();
+            await RefreshReplayCountAsync();
+            await DrainQueueAndReportAsync(quiet: true); // 지난 세션에 남은 큐 정리
+        };
+        Closed += (_, _) => _queueWatcher?.Dispose();
     }
 
     private void BrowseButton_Click(object sender, RoutedEventArgs e)
@@ -99,8 +121,123 @@ public partial class MainWindow : Window
             if (!ReferenceEquals(_pipeClient, client)) return;
             ApplyPipeStatus(status);
         });
+        client.MessageReceived += line => Dispatcher.Invoke(() =>
+        {
+            if (!ReferenceEquals(_pipeClient, client)) return;
+            HandlePipeMessage(line);
+        });
         ApplyPipeStatus(PipeStatus.Connecting);
         client.ConnectAsync();
+    }
+
+    // ── 리플레이 저장 서버 ──────────────────────────────────────────────
+
+    private void StartQueueWatcher()
+    {
+        try
+        {
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "LazerSR", "replayupload");
+            Directory.CreateDirectory(dir);
+
+            _queueWatcher = new FileSystemWatcher(dir, "*.json") { EnableRaisingEvents = true };
+            // Hook이 매 게임 후 큐 파일을 떨구면(트리거 #2) 여기서 잡아 바로 업로드한다.
+            _queueWatcher.Created += (_, _) => Dispatcher.Invoke(() =>
+            {
+                _drainDebounce.Stop();
+                _drainDebounce.Start();
+            });
+        }
+        catch (Exception ex)
+        {
+            StatusTextBlock.Text = $"큐 감시 시작 실패: {ex.Message}";
+        }
+    }
+
+    private async void CollectReplaysButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_collectInFlight) return;
+
+        if (_pipeClient == null || _pipeClient.Status != PipeStatus.Connected)
+        {
+            StatusTextBlock.Text = "osu!를 먼저 실행하세요.";
+            return;
+        }
+
+        _collectInFlight = true;
+        CollectReplaysButton.IsEnabled = false;
+        StatusTextBlock.Text = "로컬 리플레이 확인 중…";
+        await _pipeClient.SendAsync("replaycollect:scan");
+        // 응답은 HandlePipeMessage에서 비동기로 온다.
+    }
+
+    private async void HandlePipeMessage(string line)
+    {
+        if (!line.StartsWith("replaycollect:")) return;
+
+        string payload = line["replaycollect:".Length..];
+
+        if (payload == "notready")
+        {
+            StatusTextBlock.Text = "osu! 로그인 상태를 확인한 뒤 선곡 화면에서 다시 시도하세요.";
+            FinishCollect();
+        }
+        else if (payload == "error")
+        {
+            StatusTextBlock.Text = "리플레이 수집 중 오류가 발생했습니다.";
+            FinishCollect();
+        }
+        else if (payload.StartsWith("queued:"))
+        {
+            int.TryParse(payload["queued:".Length..], out int n);
+            StatusTextBlock.Text = n == 0 ? "새로 올릴 리플레이가 없습니다." : $"{n}개 발견 — 업로드 중…";
+            try { await DrainQueueAndReportAsync(quiet: false); }
+            finally { FinishCollect(); }
+        }
+    }
+
+    private void FinishCollect()
+    {
+        _collectInFlight = false;
+        CollectReplaysButton.IsEnabled = true;
+    }
+
+    private async Task DrainQueueAndReportAsync(bool quiet)
+    {
+        if (_syncInFlight) return;
+        _syncInFlight = true;
+
+        try
+        {
+            var result = await ReplayServerClient.DrainQueueAsync(s => Dispatcher.Invoke(() => StatusTextBlock.Text = s));
+
+            if (result.Total > 0)
+            {
+                string msg = $"동기화 완료 — 업로드 {result.Uploaded} · 중복 {result.Duplicate} · 실패 {result.Failed}";
+                if (result.FirstError != null)
+                    msg += $"\n{result.FirstError}";
+                StatusTextBlock.Text = msg;
+            }
+            else if (!quiet)
+            {
+                StatusTextBlock.Text = "동기화할 리플레이가 없습니다.";
+            }
+
+            await RefreshReplayCountAsync();
+        }
+        finally
+        {
+            _syncInFlight = false;
+        }
+    }
+
+    private async Task RefreshReplayCountAsync()
+    {
+        int? count = await ReplayServerClient.GetReplayCountAsync();
+        ReplayCountTextBlock.Text = count is { } n
+            ? $"리플레이 {n}개 저장됨"
+            : "리플레이 서버에 연결하지 못함";
     }
 
     private void DisconnectPipe()

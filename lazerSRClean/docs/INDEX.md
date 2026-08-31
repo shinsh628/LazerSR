@@ -54,10 +54,13 @@
 | `LazerSR.Hook\Data\` | 불변 record 데이터 타입 + 화면 간 전달용 상태 슬롯(`ManiaSimulationState`, `ManiaOverlayVisibility` 등) | 관리대상 |
 | `LazerSR.Hook\PersonalSunny\` | 개인화 diff 파이프라인 — 큐/J캐시/적합결과 저장소, 모드 화이트리스트, `PersonalSunnyService`(굽기+적합 오케스트레이터), `Player.ImportScore` 자동 수집 패치. `architecture.md` §17 | **관리대상** (2026-08-19 신규) |
 | `LazerSR.Hook\LazerSrStorage.cs` | 개인 저장소(`%LocalAppData%\LazerSR\`) 경로/원자적 쓰기 유틸. 네임스페이스는 루트 고정(`architecture.md` §16) | 관리대상 |
-| `LazerSR.Hook\Ipc\PipeServer.cs` | Named Pipe 서버 (`sunny:on/off` + ad-hoc 브로드캐스트) | 관리대상 |
+| `LazerSR.Hook\Ipc\PipeServer.cs` | Named Pipe 서버 (`sunny:on/off` + `replaycollect:scan` + ad-hoc 브로드캐스트) | 관리대상 |
+| `LazerSR.Hook\ReplayUpload\` | 리플레이 저장 서버 연동 (Hook 측) — realm 스캔·`.osr` 헤더 파서·큐 작성. 업로드는 안 함. `architecture.md` §22 | **관리대상** (2026-08-31 신규) |
+| `LazerSR.Hook\Patches\ReplayAutoUploadPatch.cs` | 매 실제 게임 종료 후 리플레이를 큐에 넣는 `Player.ImportScore` Postfix (§22) | 관리대상 (2026-08-31 신규) |
 | `LazerSR.Launcher\` | WPF 런처 EXE — osu! 실행 + Pipe 클라이언트 | **관리대상** |
 | `LazerSR.Launcher\Configuration\` | 설치 경로/설정 저장 | 관리대상 |
 | `LazerSR.Launcher\Update\` | GitHub Releases 기반 자동 업데이트 검사·다운로드 (`architecture.md` §21) | **관리대상** (2026-08-30 신규) |
+| `LazerSR.Launcher\Replay\` | 리플레이 저장 서버 클라이언트 — 큐 드레인·multipart 업로드·개수 조회. 에러 그대로 노출 (`architecture.md` §22) | **관리대상** (2026-08-31 신규) |
 | `LazerSR.SunnyCalculator\` | 독립 sunnySR 계산 파이프라인 (osu! `DifficultyCalculator` 비상속) | **관리대상** |
 | `LazerSR.SunnyCalculator\Difficulty\` | sunnyosu에서 이식된 skill/evaluator/preprocessor | 관리대상 |
 | `LazerSR.SunnyCalculator\Tuning\` | sunny 상수 39개 + 만인/개인화 diff + `WithIsolatedDiff` 격리 계층 + 개인화 fit 솔버/굽기. `architecture.md` §17 | **관리대상** (2026-08-19 확장) |

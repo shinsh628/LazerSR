@@ -114,6 +114,8 @@ public static class PipeServer
                         SetUniversalDiffEnabled(true);
                     else if (line == "sunnyplus:off")
                         SetUniversalDiffEnabled(false);
+                    else if (line == "replaycollect:scan")
+                        DispatchReplayCollectScan();
                 }
             }
             finally
@@ -134,5 +136,25 @@ public static class PipeServer
     {
         DiffCombiner.UniversalDiffEnabled = enabled;
         SunnyConstants.Reload();
+    }
+
+    private static void DispatchReplayCollectScan() => Task.Run(HandleReplayCollectScan);
+
+    // "리플레이 수집" 버튼. 네트워크는 안 함 — 로컬 realm을 훑어 큐 파일만 쓰고, 몇 건 썼는지
+    // (또는 아직 준비 안 됐는지)를 런처에 회신한다. 실제 업로드는 런처가 이어서 한다.
+    private static async Task HandleReplayCollectScan()
+    {
+        try
+        {
+            int? count = ReplayUpload.ReplayCollectService.CollectAll();
+            await BroadcastAsync(count == null
+                ? "replaycollect:notready"
+                : $"replaycollect:queued:{count}");
+        }
+        catch (Exception ex)
+        {
+            HookLog.Write($"[PipeServer] HandleReplayCollectScan failed: {ex.Message}");
+            await BroadcastAsync("replaycollect:error");
+        }
     }
 }
