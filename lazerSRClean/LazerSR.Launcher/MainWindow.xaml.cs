@@ -1,9 +1,13 @@
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using LazerSR.Launcher.Configuration;
 using LazerSR.Launcher.Ipc;
 using LazerSR.Launcher.Replay;
+using LazerSR.Launcher.Sunny;
 using Microsoft.Win32;
 
 namespace LazerSR.Launcher;
@@ -16,6 +20,11 @@ public partial class MainWindow : Window
 
     private bool _collectInFlight;
     private bool _syncInFlight;
+
+    // sunny 정렬: Hook이 sunnyup:으로 보내온 계산값을 모아 서버에 배치 업로드한다.
+    private readonly List<SunnySortClient.Entry> _sunnyBuf = new();
+    private readonly object _sunnyBufLock = new();
+    private DispatcherTimer? _sunnyFlushTimer;
 
     public MainWindow() : this(new InstallPathProvider(new LauncherSettingsStore())) { }
 
@@ -146,6 +155,22 @@ public partial class MainWindow : Window
             return;
         }
 
+        // sunny 정렬: 실행 시 Hook이 서버 덤프를 요청한다 (트리거 ③).
+        if (line.StartsWith("sunnysyncreq:"))
+        {
+            var p = line.Split(':', 3);
+            if (p.Length >= 3)
+                _ = HandleSunnySyncAsync(p[1], p[2]);
+            return;
+        }
+
+        // sunny 정렬: Hook 워커가 계산값 하나를 보고한다. 버퍼에 모아 배치 업로드.
+        if (line.StartsWith("sunnyup:"))
+        {
+            QueueSunnyUpload(line);
+            return;
+        }
+
         // lazerSR 리더보드: Hook은 네트워크를 못 쓰므로 서버 조회를 런처가 대신한다.
         if (line.StartsWith("lbreq:"))
         {
@@ -190,6 +215,80 @@ public partial class MainWindow : Window
     {
         _collectInFlight = false;
         CollectReplaysButton.IsEnabled = true;
+    }
+
+    // ── sunny 정렬 ─────────────────────────────────────────────────────
+
+    private async Task HandleSunnySyncAsync(string reqId, string calcVersionRaw)
+    {
+        try
+        {
+            int calcVersion = int.TryParse(calcVersionRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int v) ? v : 0;
+            string json = await SunnySortClient.GetAllRawAsync(calcVersion);
+            await SendPipeAsync($"sunnysyncreqok:{reqId}:{json}");
+        }
+        catch (Exception ex)
+        {
+            await SendPipeAsync($"sunnysyncreqerr:{reqId}:{ex.Message}");
+        }
+    }
+
+    private void QueueSunnyUpload(string line)
+    {
+        // sunnyup:<hash>:<rate>:<sr>:<calcVersion>
+        var p = line.Split(':');
+        if (p.Length < 5)
+            return;
+
+        if (!double.TryParse(p[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double rate)) return;
+        if (!double.TryParse(p[3], NumberStyles.Float, CultureInfo.InvariantCulture, out double sr)) return;
+        if (!int.TryParse(p[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out int calcVersion)) return;
+
+        lock (_sunnyBufLock)
+            _sunnyBuf.Add(new SunnySortClient.Entry(p[1], rate, sr, calcVersion));
+
+        _sunnyFlushTimer ??= CreateSunnyFlushTimer();
+        _sunnyFlushTimer.Stop();
+        _sunnyFlushTimer.Start();
+
+        bool full;
+        lock (_sunnyBufLock)
+            full = _sunnyBuf.Count >= 100;
+
+        if (full)
+            _ = FlushSunnyAsync();
+    }
+
+    private DispatcherTimer CreateSunnyFlushTimer()
+    {
+        var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        t.Tick += (_, _) => { t.Stop(); _ = FlushSunnyAsync(); };
+        return t;
+    }
+
+    private async Task FlushSunnyAsync()
+    {
+        List<SunnySortClient.Entry> batch;
+        lock (_sunnyBufLock)
+        {
+            if (_sunnyBuf.Count == 0)
+                return;
+            batch = new List<SunnySortClient.Entry>(_sunnyBuf);
+            _sunnyBuf.Clear();
+        }
+
+        try
+        {
+            await SunnySortClient.PostBatchAsync(batch);
+        }
+        catch (Exception ex)
+        {
+            // 실패한 배치는 다시 넣어 다음 flush 때 재시도.
+            lock (_sunnyBufLock)
+                _sunnyBuf.InsertRange(0, batch);
+
+            Dispatcher.Invoke(() => StatusTextBlock.Text = $"sunny 업로드 실패: {ex.Message}");
+        }
     }
 
     private async Task HandleLeaderboardRequestAsync(string reqId, string beatmapMd5, string modsToken)

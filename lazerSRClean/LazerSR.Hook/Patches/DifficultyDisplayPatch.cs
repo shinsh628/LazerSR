@@ -84,6 +84,9 @@ public static class DifficultyDisplayPatch
             var rulesetStore = deps?.Get(typeof(RulesetStore)) as RulesetStore;
             ReplayUpload.HookRuntimeContext.Populate(realmAccess, storage, apiProvider, scoreManager, beatmapManager, rulesetStore);
 
+            // sunny 정렬: 실행 시 서버 캐시값 1회 당겨오기 (트리거 ③)
+            SunnySort.SunnySortServerSync.RequestOnce();
+
             void Recalculate()
             {
                 var cts = new CancellationTokenSource();
@@ -95,6 +98,18 @@ public static class DifficultyDisplayPatch
                 RulesetInfo ruleset = rulesetBindable.Value;
                 IReadOnlyList<Mod> mods = modsBindable.Value;
                 CancellationToken token = cts.Token;
+
+                // sunny 정렬: 방금 스코프된 맵을 워커 큐에 (트리거 ②). 3개 rate를 워커가 깨끗한 모드로 계산.
+                try
+                {
+                    string h = working.BeatmapInfo?.Hash ?? string.Empty;
+                    if (!string.IsNullOrEmpty(h) && ruleset.OnlineID == 3)
+                        SunnySort.SunnySortWorker.Enqueue(h);
+                }
+                catch
+                {
+                    // ignored
+                }
 
                 if (ruleset.OnlineID != 3)
                 {

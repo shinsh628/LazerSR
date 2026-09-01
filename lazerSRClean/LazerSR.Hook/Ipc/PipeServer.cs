@@ -146,6 +146,9 @@ public static class PipeServer
                 await writer.WriteAsync("connected\n");
                 await writer.FlushAsync();
 
+                // 런처가 (재)연결됐다 - sunny 정렬의 서버 대조가 아직 안 됐으면 지금 재시도.
+                SunnySort.SunnySortServerSync.OnLauncherConnected();
+
                 while (pipe.IsConnected)
                 {
                     string? line;
