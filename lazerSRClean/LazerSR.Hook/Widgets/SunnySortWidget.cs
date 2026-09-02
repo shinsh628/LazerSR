@@ -81,6 +81,7 @@ public partial class SunnySortWidget : CompositeDrawable, ISerialisableDrawable
     private ScheduledDelegate? rangeDebounce;
     private int lastStateVersion = -1;
     private int totalManiaMaps = -1;
+    private double nextCountRefreshTime;
 
     public SunnySortWidget()
     {
@@ -295,6 +296,17 @@ public partial class SunnySortWidget : CompositeDrawable, ISerialisableDrawable
             countText.Text = $"계산 중  {SunnySortWorker.ScopeDone}/{Math.Max(SunnySortWorker.ScopeTotal, 1)}";
             return;
         }
+
+        // 정렬이 꺼져 있으면 DistinctMapCount(캐시 전체 O(n) 스캔)를 매 프레임 돌리지 않는다 -
+        // 맵이 많을수록(수만 개) 이게 매 프레임 비용이 커져 위젯이 떠있기만 해도 렉이 걸렸었다.
+        if (!SunnySortState.SortActive)
+            return;
+
+        // 켜져 있는 동안에도 매 프레임 재계산할 필요는 없다 - 0.5초 간격으로 충분.
+        double now = Time.Current;
+        if (now < nextCountRefreshTime)
+            return;
+        nextCountRefreshTime = now + 500;
 
         if (totalManiaMaps < 0 && realm != null)
         {
