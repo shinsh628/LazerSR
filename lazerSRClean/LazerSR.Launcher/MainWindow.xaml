@@ -76,7 +76,7 @@
         <!-- TEMP: sunny+ kill switch, remove once the everyone-diff is trusted -->
         <CheckBox x:Name="SunnyPlusCheckBox"
                   Content="sunny+ 사용"
-                  IsChecked="True"
+                  IsChecked="False"
                   Margin="0,0,0,4"
                   Checked="SunnyPlusCheckBox_Toggled"
                   Unchecked="SunnyPlusCheckBox_Toggled"/>

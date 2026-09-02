@@ -73,7 +73,9 @@ namespace osu.Game.Rulesets.Mania.Difficulty.Skills
 
             // 시프트된 상수 세트(만인 sunny+ 활성 또는 개인화 격리 스코프)에서만 커스텀 억제를 탄다.
             // 체크박스를 꺼서 스톡 sunny로 돌아온 경우엔 바닐라 파이프라인 그대로 — 고SR rescale.
-            if (DiffCombiner.UniversalDiffEnabled || SunnyConstants.IsIsolatedScopeActive)
+            // ForceVanillaTail은 격리 스코프 안에서도 이 바닐라 경로를 강제한다 — sunny+ 체크박스
+            // 상태와 무관하게 항상 순정값이 필요한 소비처(SunnySortWorker)용.
+            if (!SunnyConstants.ForceVanillaTail && (DiffCombiner.UniversalDiffEnabled || SunnyConstants.IsIsolatedScopeActive))
             {
                 // Temporary nerf for the shifted constant set. Must run before the high-end rescale.
                 scaled = SunnyTempNerf.Apply(scaled);

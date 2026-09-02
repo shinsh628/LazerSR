@@ -245,6 +245,20 @@ public static class SunnyConstants
     public static bool IsIsolatedScopeActive => isolatedOverride.Value != null;
 
     /// <summary>
+    /// AsyncLocal companion to <see cref="isolatedOverride"/>. Every existing isolated-diff consumer
+    /// (personal-diff baking/display) is inherently non-stock, so <c>Strain.DifficultyValue()</c> treats
+    /// "isolated scope active" alone as reason enough to take the shifted-constant-set tail. That is wrong
+    /// for a caller that isolates specifically to force a truly vanilla (zero-delta) read regardless of the
+    /// ambient sunny+ checkbox — this flag lets <see cref="WithIsolatedDiff{T}(double[], bool, Func{T})"/>
+    /// tell <c>Strain</c> to use the stock high-SR rescale instead, exactly as if no diff (universal or
+    /// isolated) were active at all.
+    /// </summary>
+    private static readonly AsyncLocal<bool> forceVanillaTailOverride = new();
+
+    /// <summary>See <see cref="forceVanillaTailOverride"/>.</summary>
+    public static bool ForceVanillaTail => forceVanillaTailOverride.Value;
+
+    /// <summary>
     /// Runs <paramref name="action"/> with <paramref name="deltas"/> (a full stock-relative delta vector —
     /// e.g. everyone-diff + personal-diff, or that plus one perturbed dimension for Jacobian baking) active
     /// for every <see cref="SunnyConstants"/> read <paramref name="action"/> triggers, directly or through
@@ -252,11 +266,23 @@ public static class SunnyConstants
     /// is untouched, so this can run concurrently with normal song select / results screen sunny calculations
     /// without corrupting them.
     /// </summary>
-    public static T WithIsolatedDiff<T>(double[] deltas, Func<T> action)
+    public static T WithIsolatedDiff<T>(double[] deltas, Func<T> action) => WithIsolatedDiff(deltas, forceVanillaTail: false, action);
+
+    /// <summary>
+    /// Overload of <see cref="WithIsolatedDiff{T}(double[], Func{T})"/> that also lets the caller force the
+    /// stock high-SR rescale tail (see <see cref="ForceVanillaTail"/>) instead of the shifted-constant-set
+    /// nerf that isolated scopes otherwise always take. Pass an all-zero <paramref name="deltas"/> together
+    /// with <c>forceVanillaTail: true</c> to get a value that is bit-for-bit what stock sunny with sunny+
+    /// off would produce, independent of the live <see cref="DiffCombiner.UniversalDiffEnabled"/> flag and
+    /// safe to run concurrently with it (AsyncLocal, not the shared mutable flag).
+    /// </summary>
+    public static T WithIsolatedDiff<T>(double[] deltas, bool forceVanillaTail, Func<T> action)
     {
         double[] values = computeValues(deltas);
         double[]? previous = isolatedOverride.Value;
+        bool previousVanilla = forceVanillaTailOverride.Value;
         isolatedOverride.Value = values;
+        forceVanillaTailOverride.Value = forceVanillaTail;
 
         try
         {
@@ -265,6 +291,7 @@ public static class SunnyConstants
         finally
         {
             isolatedOverride.Value = previous;
+            forceVanillaTailOverride.Value = previousVanilla;
         }
     }
 

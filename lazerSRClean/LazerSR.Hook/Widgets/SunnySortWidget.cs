@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using LazerSR.Hook.SunnySort;
@@ -15,9 +16,11 @@ using osu.Game.Graphics;
 using osu.Game.Graphics.Sprites;
 using osu.Game.Graphics.UserInterface;
 using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Rulesets.Mods;
 using osu.Game.Screens.Play;
 using osu.Game.Screens.Select.Filter;
 using osu.Game.Skinning;
+using LazerSR.Hook.PersonalSunny;
 using osuTK;
 using osuTK.Graphics;
 
@@ -46,10 +49,10 @@ public partial class SunnySortWidget : CompositeDrawable, ISerialisableDrawable
     private GameplayState? gameplayState { get; set; }
 
     [Resolved(canBeNull: true)]
-    private OsuConfigManager? config { get; set; }
+    private RealmAccess? realm { get; set; }
 
     [Resolved(canBeNull: true)]
-    private RealmAccess? realm { get; set; }
+    private Bindable<IReadOnlyList<Mod>>? mods { get; set; }
 
     private FillFlowContainer root = null!;
     private RoundedButton noModButton = null!;
@@ -75,7 +78,6 @@ public partial class SunnySortWidget : CompositeDrawable, ISerialisableDrawable
         Default = SunnySortState.RangeUpper,
     };
 
-    private GroupMode? savedGroupMode;
     private ScheduledDelegate? rangeDebounce;
     private int lastStateVersion = -1;
     private int totalManiaMaps = -1;
@@ -185,10 +187,10 @@ public partial class SunnySortWidget : CompositeDrawable, ISerialisableDrawable
         rangeLower.BindValueChanged(_ => onRangeChanged());
         rangeUpper.BindValueChanged(_ => onRangeChanged());
 
-        // 세션 간 유지된 상태 반영 - 정렬이 켜진 채로 껐다 켰으면 평면화·드롭다운 비활성·재필터.
+        // 세션 간 유지된 상태 반영 - 정렬이 켜진 채로 껐다 켰으면 정렬 드롭다운 비활성·재필터.
+        // (모드 자동 적용은 버튼을 누르는 그 순간에만 하는 편의 기능이라 여기서는 다시 안 건드린다.)
         if (SunnySortState.SortActive)
         {
-            applyFlatten(true);
             SunnySortRefs.SetFilterControlsDisabled(true);
             SunnySortRefs.Refilter();
         }
@@ -218,34 +220,27 @@ public partial class SunnySortWidget : CompositeDrawable, ISerialisableDrawable
         var newMode = SunnySortState.ActiveSort == mode ? SunnySortMode.Off : mode;
         bool on = newMode != SunnySortMode.Off;
 
-        applyFlatten(on);
         SunnySortRefs.SetFilterControlsDisabled(on);
         SunnySortState.ActiveSort = newMode;
+
+        // 편의 기능: 버튼이 켜지는 그 순간에만 한 번 모드를 맞춰준다. 강제/지속 적용이 아니라서
+        // 끌 때는 되돌리지 않고, 이후 사용자가 모드를 바꿔도 다시 개입하지 않는다.
+        if (on)
+            applyModForSort(newMode);
 
         refreshButtons();
         SunnySortRefs.Refilter();
     }
 
-    private void applyFlatten(bool on)
+    private void applyModForSort(SunnySortMode mode)
     {
-        if (config == null)
+        if (mods == null)
             return;
 
         try
         {
-            var gm = config.GetBindable<GroupMode>(OsuSetting.SongSelectGroupMode);
-
-            if (on)
-            {
-                if (savedGroupMode == null && gm.Value != GroupMode.None)
-                    savedGroupMode = gm.Value;
-                gm.Value = GroupMode.None;
-            }
-            else if (savedGroupMode != null)
-            {
-                gm.Value = savedGroupMode.Value;
-                savedGroupMode = null;
-            }
+            double rate = SunnySortState.RateFor(mode);
+            mods.Value = PersonalSunnyModWhitelist.Reconstruct(rate, null);
         }
         catch (Exception)
         {
@@ -325,16 +320,9 @@ public partial class SunnySortWidget : CompositeDrawable, ISerialisableDrawable
         rangeDebounce?.Cancel();
 
         // 위젯이 사라져도 osu 드롭다운은 다시 살려둔다(계속 비활성이면 사용자가 갇힌다).
-        // group 값 복원도 시도 - 실패하면 무시(Dispose가 업데이트 스레드 밖일 수 있음).
         try
         {
             SunnySortRefs.SetFilterControlsDisabled(false);
-
-            if (savedGroupMode != null && config != null)
-            {
-                config.GetBindable<GroupMode>(OsuSetting.SongSelectGroupMode).Value = savedGroupMode.Value;
-                savedGroupMode = null;
-            }
         }
         catch
         {

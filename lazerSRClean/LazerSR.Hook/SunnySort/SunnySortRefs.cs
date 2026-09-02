@@ -32,7 +32,9 @@ public static class SunnySortRefs
         }
     }
 
-    /// <summary>정렬이 켜져 있는 동안 osu의 정렬·그룹 드롭다운을 비활성화한다(우리가 순서를 지배하므로).</summary>
+    /// <summary>정렬이 켜져 있는 동안 osu의 정렬 드롭다운만 비활성화한다(우리가 순서를 지배하므로).
+    /// 그룹 드롭다운은 건드리지 않는다 — 세트-난이도 평탄화는 <see cref="LazerSR.Hook.Patches.SunnySortGroupingPatch"/>가
+    /// criteria.Group과 무관하게 이미 처리하므로, 사용자가 고른 그룹(Artist 등)은 그대로 유지된다.</summary>
     public static void SetFilterControlsDisabled(bool disabled)
     {
         var fc = FilterControl;
@@ -41,15 +43,12 @@ public static class SunnySortRefs
 
         try
         {
-            foreach (string fieldName in new[] { "sortDropdown", "groupDropdown" })
-            {
-                object? dropdown = AccessTools.Field(fc.GetType(), fieldName)?.GetValue(fc);
-                if (dropdown == null)
-                    continue;
+            object? dropdown = AccessTools.Field(fc.GetType(), "sortDropdown")?.GetValue(fc);
+            if (dropdown == null)
+                return;
 
-                if (AccessTools.Property(dropdown.GetType(), "Current")?.GetValue(dropdown) is IBindable current)
-                    AccessTools.Property(current.GetType(), "Disabled")?.SetValue(current, disabled);
-            }
+            if (AccessTools.Property(dropdown.GetType(), "Current")?.GetValue(dropdown) is IBindable current)
+                AccessTools.Property(current.GetType(), "Disabled")?.SetValue(current, disabled);
         }
         catch (Exception)
         {

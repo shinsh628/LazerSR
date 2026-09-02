@@ -20,10 +20,11 @@ public enum SunnySortMode
 public static class SunnySortState
 {
     /// <summary>
-    /// osu-tree <c>ManiaDifficultyCalculator.Version</c>. 그 값이 바뀌면(계산식 변경) 캐시된 SR이
-    /// 전부 무효 — 여기 숫자도 같이 올린다.
+    /// osu-tree <c>ManiaDifficultyCalculator.Version</c>을 기본값으로 삼되, 우리 쪽 계산 경로가 바뀌어도
+    /// (osu-tree 버전이 그대로여도) 여기 숫자를 올려 캐시된 SR을 전부 무효화한다.
+    /// 2026-09-02: sunny+ 체크박스가 켜진 채로 계산된 값이 섞여 들어가던 버그를 고치면서 +1.
     /// </summary>
-    public const int CalcVersion = 20241007;
+    public const int CalcVersion = 20241007 + 1;
 
     public const double RangeLower = 0;
 

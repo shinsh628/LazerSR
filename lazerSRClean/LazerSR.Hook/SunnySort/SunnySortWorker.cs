@@ -7,6 +7,7 @@ using LazerSR.Hook.Ipc;
 using LazerSR.Hook.PersonalSunny;
 using LazerSR.Hook.ReplayUpload;
 using LazerSR.SunnyCalculator;
+using LazerSR.SunnyCalculator.Tuning;
 using osu.Game.Beatmaps;
 using osu.Game.Rulesets.Mods;
 
@@ -163,7 +164,12 @@ public static class SunnySortWorker
                 ? Array.Empty<Mod>()
                 : PersonalSunnyModWhitelist.Reconstruct(rate, null);
 
-            double sr = SunnyRunner.Calculate(working, mania, mods);
+            // 캐시/서버에 올라가는 값은 만인 sunny+ 체크박스 상태와 무관하게 항상 순정값이어야 한다 -
+            // 격리(zero delta + forceVanillaTail)로 라이브 게임 화면의 sunny 계산과 레이스 없이 강제한다.
+            double sr = SunnyConstants.WithIsolatedDiff(
+                new double[SunnyConstants.Count],
+                forceVanillaTail: true,
+                () => SunnyRunner.Calculate(working, mania, mods));
 
             SunnySortCache.Put(hash, rate, sr, save: false);
             _ = PipeServer.BroadcastAsync(
