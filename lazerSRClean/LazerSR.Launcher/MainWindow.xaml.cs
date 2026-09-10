@@ -38,6 +38,7 @@ public partial class MainWindow : Window
         {
             await RefreshReplayCountAsync();
             await DrainQueueAndReportAsync(quiet: true); // 지난 세션에 남거나 런처 없이 친 판 회수
+            await DrainDanPlaysAsync(quiet: true);
         };
     }
 
@@ -152,6 +153,12 @@ public partial class MainWindow : Window
         if (line == "replayqueued")
         {
             await DrainQueueAndReportAsync(quiet: false);
+            return;
+        }
+
+        if (line == "danplayqueued")
+        {
+            await DrainDanPlaysAsync(quiet: false);
             return;
         }
 
@@ -322,6 +329,34 @@ public partial class MainWindow : Window
         var client = _pipeClient;
         if (client is { Status: PipeStatus.Connected })
             await client.SendAsync(line);
+    }
+
+    private bool _danSyncInFlight;
+
+    private async Task DrainDanPlaysAsync(bool quiet)
+    {
+        if (_danSyncInFlight) return;
+        _danSyncInFlight = true;
+        try
+        {
+            var result = await Replay.DanPlayServerClient.DrainQueueAsync(
+                s => Dispatcher.Invoke(() => StatusTextBlock.Text = s));
+
+            if (result.Uploaded > 0 || result.Failed > 0)
+            {
+                string msg = $"dan 동기화 — 업로드 {result.Uploaded} · 실패 {result.Failed}";
+                if (result.FirstError != null) msg += $"\n{result.FirstError}";
+                StatusTextBlock.Text = msg;
+            }
+            else if (!quiet)
+            {
+                StatusTextBlock.Text = "동기화할 dan 기록이 없습니다.";
+            }
+        }
+        finally
+        {
+            _danSyncInFlight = false;
+        }
     }
 
     private async Task DrainQueueAndReportAsync(bool quiet)

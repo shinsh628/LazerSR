@@ -12,8 +12,19 @@
 //   takes no rate and no scoreGoal argument. To evaluate an arbitrary requested
 //   rate we RESCALE every row time by 1/rate before the call and read the R10
 //   (1.0x) field of the result — equivalent to feeding `musicRate` into the WASM.
-//   We never read the other Rxx fields. MsdOptions.ScoreGoal is therefore ignored
-//   (documented deviation: the WASM path honoured scoreGoal, the DLL export does not).
+//   We never read the other Rxx fields.
+// PORT NOTE (scoreGoal): the DLL ALSO exports `calc_ssr(calc, rows, num, music_rate,
+//   score_goal, keycount) -> Ssr` — the standard MinaSDCalc SSR path, which DOES
+//   honour both music_rate and score_goal (verified: goal 0.93 vs 0.99 shift the
+//   skillset vector). `MsdAtGoalNative` uses it for the player-rating pipeline,
+//   which needs SSR at the play's wife accuracy goal. Rows are passed RAW (no 1/rate
+//   rescale) because calc_ssr applies music_rate internally. Still 4K-only.
+// PORT NOTE (engine version): our DLL is MinaCalc v505. mania-hub's player-rating
+//   MSD path runs LeoBlack's vendored Etterna WASM — v0.72.3 for 4K, v0.74.0 for
+//   non-4K (vendor/leoblack/ett/versions/index.js). So our skillset values are NOT
+//   bit-identical to mania-hub's; the bucket argmax is generally stable across the
+//   gap but the published SSR numbers differ by a few percent. See
+//   temp/player-rating-port/MINACALC-ENGINE-NOTE.md.
 
 using System.Runtime.InteropServices;
 using LazerSR.DanCalculator.Beatmap;
@@ -40,6 +51,7 @@ public sealed record MsdTimeline(
 public static class MinaCalcNative
 {
     private static volatile bool _available;
+    private static volatile bool _ssrExportMissing;
     private static IntPtr _calc;
 
     private static readonly object _mailboxLock = new();
@@ -69,6 +81,19 @@ public static class MinaCalcNative
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public override void Run() => Result.TrySetResult(RunTimeline(this));
+    }
+
+    private sealed class MsdAtGoalRequest : Request
+    {
+        public required uint[] Masks;
+        public required float[] Times;
+        public required float Rate;
+        public required float Goal;
+        public required uint KeyCount;
+        public readonly TaskCompletionSource<MsdSkillset?> Result =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override void Run() => Result.TrySetResult(RunMsdAtGoal(this));
     }
 
     static MinaCalcNative()
@@ -138,6 +163,36 @@ public static class MinaCalcNative
         return req.Result.Task.GetAwaiter().GetResult();
     }
 
+    /// <summary>
+    /// SSR skillset values for the given rows at an arbitrary <paramref name="rate"/> AND
+    /// <paramref name="goal"/> (wife accuracy goal), via the DLL's <c>calc_ssr</c> export.
+    /// Rows are passed raw — calc_ssr applies the music rate internally. 4K only
+    /// (<paramref name="keyCount"/> must be 4; v505 has no n-key pipeline).
+    /// Returns null when the native lib / calc_ssr export is unavailable, the compute
+    /// fails, or rows.Count &lt;= 1.
+    /// </summary>
+    public static MsdSkillset? MsdAtGoalNative(IReadOnlyList<MsdNoteRow> rows, double rate, double goal, int keyCount)
+    {
+        if (rows == null || rows.Count <= 1) return null;
+        if (_ssrExportMissing) return null;
+        if (keyCount != 4) return null; // PORT NOTE: v505 calc_ssr is 4K-only.
+        if (!double.IsFinite(rate) || rate <= 0) rate = 1.0;
+        if (!double.IsFinite(goal) || goal <= 0) goal = 0.93;
+
+        var (masks, times) = RawNativeArrays(rows);
+
+        var req = new MsdAtGoalRequest
+        {
+            Masks = masks,
+            Times = times,
+            Rate = (float)rate,
+            Goal = (float)goal,
+            KeyCount = (uint)keyCount,
+        };
+        Enqueue(req);
+        return req.Result.Task.GetAwaiter().GetResult();
+    }
+
     /// <summary>Per-interval skillset timeline for the given rows at <paramref name="rate"/>.</summary>
     public static MsdTimeline? CalcTimelineNative(IReadOnlyList<MsdNoteRow> rows, double rate)
     {
@@ -170,6 +225,22 @@ public static class MinaCalcNative
         return (masks, times);
     }
 
+    /// <summary>Native rows in seconds, NO 1/rate rescale (calc_ssr takes music_rate itself).
+    /// Same negative-timestamp shift as <see cref="ToNativeArrays"/>.</summary>
+    private static (uint[] Masks, float[] Times) RawNativeArrays(IReadOnlyList<MsdNoteRow> rows)
+    {
+        int offset = rows.Count > 0 && rows[0].TimeMs < 0 ? -rows[0].TimeMs : 0;
+
+        var masks = new uint[rows.Count];
+        var times = new float[rows.Count];
+        for (int i = 0; i < rows.Count; i++)
+        {
+            masks[i] = rows[i].ColumnMask;
+            times[i] = (float)((rows[i].TimeMs + offset) / 1000.0);
+        }
+        return (masks, times);
+    }
+
     // ---- worker thread ----------------------------------------------------------
 
     private static void Enqueue(Request req)
@@ -185,6 +256,7 @@ public static class MinaCalcNative
         {
             case MsdRequest m: m.Result.TrySetResult(null); break;
             case TimelineRequest t: t.Result.TrySetResult(null); break;
+            case MsdAtGoalRequest g: g.Result.TrySetResult(null); break;
         }
 
         _signal.Set();
@@ -221,6 +293,7 @@ public static class MinaCalcNative
                 {
                     case MsdRequest m: m.Result.TrySetResult(null); break;
                     case TimelineRequest t: t.Result.TrySetResult(null); break;
+                    case MsdAtGoalRequest g: g.Result.TrySetResult(null); break;
                 }
             }
         }
@@ -240,6 +313,31 @@ public static class MinaCalcNative
             return new MsdSkillset(
                 r.Overall, r.Stream, r.Jumpstream, r.Handstream,
                 r.Stamina, r.Jackspeed, r.Chordjack, r.Technical);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static MsdSkillset? RunMsdAtGoal(MsdAtGoalRequest req)
+    {
+        if (!_available || _ssrExportMissing) return null;
+
+        try
+        {
+            var rows = BuildNative(req.Masks, req.Times);
+            if (rows.Length == 0) return null;
+
+            var r = CalcSsr(_calc, rows, (UIntPtr)rows.Length, req.Rate, req.Goal, req.KeyCount, CALC_MODE_SSR);
+            return new MsdSkillset(
+                r.Overall, r.Stream, r.Jumpstream, r.Handstream,
+                r.Stamina, r.Jackspeed, r.Chordjack, r.Technical);
+        }
+        catch (EntryPointNotFoundException)
+        {
+            _ssrExportMissing = true; // DLL predates calc_ssr — degrade quietly forever.
+            return null;
         }
         catch
         {
@@ -291,6 +389,18 @@ public static class MinaCalcNative
 
     [DllImport("MinaCalc", EntryPoint = "calc_msd", CallingConvention = CallingConvention.Cdecl)]
     private static extern MsdAllRatesRaw CalcMsd(IntPtr calc, NoteInfoNative[] rows, UIntPtr numRows);
+
+    // Mirrors minacalc c_code/API.cpp `calc_at_rate`:
+    //   Ssr calc_at_rate(calc, rows, num, float music_rate, float score_goal,
+    //                    unsigned int keycount, CalcMode mode)
+    // CalcMode: 0 = MSD (uncapped, goal ignored), 1 = SSR (capped, goal applies).
+    // Fork C's first wiring dropped the trailing `mode` arg -> stack misaligned ->
+    // zeroed Ssr. We want SSR mode (mode = 1).
+    [DllImport("MinaCalc", EntryPoint = "calc_ssr", CallingConvention = CallingConvention.Cdecl)]
+    private static extern SsrNative CalcSsr(IntPtr calc, NoteInfoNative[] rows, UIntPtr numRows,
+        float musicRate, float scoreGoal, uint keycount, int mode);
+
+    private const int CALC_MODE_SSR = 1;
 
     [DllImport("MinaCalc", EntryPoint = "calc_timeline", CallingConvention = CallingConvention.Cdecl)]
     private static extern int CalcTimeline(IntPtr calc, NoteInfoNative[] rows, UIntPtr numRows, float[] outBuf, int bufCapacity);

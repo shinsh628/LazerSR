@@ -1163,3 +1163,30 @@ mania-hub `src/lib/dan-images.ts` 포팅(`getDanImageSrc`/`danBareLabel`/`danSca
 - `dans\**` — dan 뱃지 이미지(`.iss`는 `recursesubdirs`, Launcher는 RelativePath로 단일파일 제외).
 - 전부 `.iss [Files]` + Launcher `ExcludeHookDepsFromSingleFile` 양쪽에 등록.
 - MinaCalc.dll은 이미 배포되고 있어 추가 없음(DanCalculator도 같은 파일을 링크).
+
+### 25. 퍼포먼스 dan — per-play 계산 + 업로드 (2026-09-11 신규, 진행 중)
+
+mania-hub의 플레이어 dan verdict(스킬셋 버킷별 dan). **판당 계산은 로컬**(맵 호버·모드 갱신에 실시간
+필요), **버킷별 windowed 합산은 서버**. 계산 로직은 이 버전으로 고정(재계산 인프라 없음).
+전체 상태·다음 작업은 `progress\2026-09-11.md`.
+
+- **`LazerSR.DanCalculator\PlayerRating\`** — `player-skills.ts` per-play 계산부 1:1 포팅:
+  `PlayEligibility`(rate/자격 게이트), `WifeGoal`(`ssrGoalForScore` + wife3), `PlaySsr`(MSD@goal + 외삽),
+  `DanBuckets`(`bucketsForClear`/`resolveTilesForClear` + 상수 ~25개), `PlayChartInfo`(`loadChartSkillInfo`),
+  `DanClearTarget`(`danClearTargetFor`), `PlayClear`(`collectDanClears` 게이트), `ChartFamily`(topology 해시),
+  `PlayUploadRecord`(업로드 DTO + `Build` 오케스트레이터).
+- **`Classifier\LeanClassification.cs`** — `chart-analysis.ts` `leanClassification()` = `classification_json`
+  shape. `DanClassifier.ClassifyChartLeanAsync`.
+- **`LazerSR.Hook\DanRating\`** — osu 객체 → DTO 글루. `DanPlayCollectorPatch`(`Player.ImportScore` Postfix)
+  → `DanPlayRecordBuilder`(**`GetPlayableBeatmap` 인코딩** — raw `working.Beatmap`은 mania 컬럼 스크램블)
+  → `DanPlayQueueWriter` → 파이프 `danplayqueued`.
+- **런처** `Replay\DanPlayServerClient.cs` — 큐 드레인 → `POST /api/v1/dan-plays`.
+- **서버** (`LazerSrReplayServer`) — `dan_plays` 테이블 + `POST/GET /api/v1/dan-plays`(저장/덤프만, 집계 미착수).
+
+**MinaCalc `calc_ssr`**: DLL v505의 `calc_ssr`은 소스 `calc_at_rate(calc, rows, num, rate, goal, keycount,
+CalcMode mode)`의 rename. `mode`(1=SSR) 인자 필수 — 빠뜨리면 스택 misalign으로 0 반환. `Msd.ComputeMsd`는
+소문자 키(`jackspeed`)를 내므로 `PlaySsr.SafeComputeMsd`가 canonical(`JackSpeed`)로 remap해야 버킷 argmax가 산다.
+
+**엔진**: v505 그대로 (mania-hub은 Etterna WASM 0.72.3). 4K SSR 숫자 few% 오차, argmax·6/7K 무영향.
+
+**미완**: 6/7K 미검증, rate-vibro 미연결(DT/HT parity 갭), 서버 집계 미착수. `progress\2026-09-11.md` 참고.

@@ -129,9 +129,10 @@ public static class Msd
 
     /// <summary>
     /// Compute the Etterna MSD skillset values for a chart at the given rate.
-    /// <c>ScoreGoal</c> is accepted for parity but ignored by the native calc.
-    /// Returns null for keymodes MinaCalc does not support (anything outside 4-18K),
-    /// and — in this port — for any non-4K chart.
+    /// When <c>ScoreGoal</c> is set the DLL's <c>calc_ssr</c> (rate + goal) path is
+    /// used (SSR mode — the player-rating pipeline); otherwise the all-rates MSD
+    /// baseline. Returns null for keymodes MinaCalc does not support (anything outside
+    /// 4-18K), and — in this port — for any non-4K chart.
     /// </summary>
     public static MsdResult? ComputeMsd(string osuText, MsdOptions? options = null)
     {
@@ -177,7 +178,9 @@ public static class Msd
         if (rows == null) return null;
         if (rows.Count <= 1) return MakeZeroValues();
 
-        var ssr = MinaCalcNative.MsdForAllRatesNative(rows, rate);
+        var ssr = options.ScoreGoal is double goal
+            ? MinaCalcNative.MsdAtGoalNative(rows, rate, goal, keycount)
+            : MinaCalcNative.MsdForAllRatesNative(rows, rate);
         if (ssr == null) return null;
 
         return new Dictionary<string, double>

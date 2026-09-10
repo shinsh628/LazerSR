@@ -69,6 +69,9 @@
 | `LazerSR.DanCalculator\PORTING.md` | JS→C# 포팅 마스터 스펙(규칙표·모듈맵·sunny/MSD 치환 계약) | 보존 |
 | `LazerSR.DanCalculator\Assets\dan_model.onnx` | Companella 신경망(304KB). dan 인포 위젯이 사용, 로프 배포(§24) | 보존 |
 | `LazerSR.DanCalculator\Credit\PerformanceDan.cs` | 맵 dan + 판정카운트 → ScoreV1/V2 정확도 → dan-credit 곡선 → 퍼포먼스 dan (§24) | 관리대상 |
+| `LazerSR.DanCalculator\PlayerRating\` | 퍼포먼스 dan per-play 계산부 (`player-skills.ts` 포팅) — 자격 게이트/wife goal/MSD@goal/버킷 배정/clear 판별/업로드 DTO. `architecture.md` §25 | **관리대상** (2026-09-11 신규) |
+| `LazerSR.DanCalculator\Classifier\LeanClassification.cs` | `classification_json` shape + `ClassifyChartLeanAsync` (§25) | 관리대상 (2026-09-11) |
+| `LazerSR.Hook\DanRating\` | osu 객체 → PlayerRating DTO 글루 + 큐 작성. `DanPlayCollectorPatch`가 `Player.ImportScore`에서 호출 (§25) | **관리대상** (2026-09-11 신규) |
 | `LazerSR.Hook\Assets\dans\` | dan 뱃지 이미지 PNG 97개(mania-hub `public/images/dans/` SVG를 resvg로 256px 래스터화). 로프 배포(§24) | 관리대상 |
 
 ---
