@@ -11,6 +11,12 @@
     <None Include="MinaCalc.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Dan badge artwork (mania-hub public/images/dans). Loaded by path from
+         <hookdir>/dans/ — see Drawables/DanImages.cs. -->
+    <None Include="Assets\dans\**\*">
+      <Link>dans\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LazerSR.SunnyCalculator\LazerSR.SunnyCalculator.csproj" />

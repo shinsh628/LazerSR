@@ -13,7 +13,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- 로컬 폴백 빌드용 기본 버전. CI는 태그에서 /p:Version=... 로 덮어쓴다 (docs\end.md 참고). -->
-    <Version>6.14.1</Version>
+    <Version>6.14.2</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,6 +27,12 @@
          Transitive project content does not carry CopyToPublishDirectory on its own. -->
     <None Include="..\LazerSR.DanCalculator\Assets\dan_model.onnx">
       <Link>dan_model.onnx</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <!-- Dan badge artwork — loose under <appdir>/dans/, loaded by path (DanImages.cs). -->
+    <None Include="..\LazerSR.Hook\Assets\dans\**\*">
+      <Link>dans\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>
@@ -68,10 +74,11 @@
                    Or '%(ResolvedFileToPublish.Filename)' == 'onnxruntime'
                    Or '%(ResolvedFileToPublish.Filename)' == 'onnxruntime_providers_shared')
                    And ('%(ResolvedFileToPublish.Extension)' == '.dll')" />
-      <!-- The dan model must be a real file on disk (Hook loads it by path), so keep
-           it out of the single-file bundle the same way. -->
+      <!-- The dan model + badge artwork must be real files on disk (Hook loads
+           them by path), so keep them out of the single-file bundle the same way. -->
       <_HookFiles Include="@(ResolvedFileToPublish)"
-          Condition="'%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)' == 'dan_model.onnx'" />
+          Condition="'%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)' == 'dan_model.onnx'
+                   Or $([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').Replace('/','\').StartsWith('dans\'))" />
       <ResolvedFileToPublish Remove="@(_HookFiles)" />
       <ResolvedFileToPublish Include="@(_HookFiles)" ExcludeFromSingleFile="true" />
     </ItemGroup>

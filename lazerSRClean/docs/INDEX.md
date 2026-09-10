@@ -49,7 +49,7 @@
 | `LazerSR.Hook\Training\` | 무한 트레이닝 — 패턴 생성 파이프라인(생성기/마디 큐/주입기), 단기 실력찾기(`ShortTermSearch`), 정확도 집계, 프로필, 배경음(`MusicLibrary`/`TrainingMusicPlayer`/`TrainingMusicStore`/`BeatmapMusicAnalysis`), 무한 세션(`InfiniteSession`). 격자 절대규칙은 `TrainingGrid`, 패턴 정의·상수는 `PatternCatalog` | **관리대상** |
 | `LazerSR.Hook\Training\Patterns\` | 세부패턴별 생성 규칙 (`IPatternGenerator` 구현체) + 공용 추첨 도구 `PatternPicker` | 관리대상 |
 | `LazerSR.Hook\Widgets\` | `ISerialisableDrawable` 스킨 위젯 구현체. 키뷰어(`KeyViewerWidget`/`KeyViewerKey`)와 `BoxElementPlus`는 osu! 본체 위젯을 상속한 것 — `architecture.md` §10/§11. 실시간 sunny(`RealtimeSunnyWidget`, 앞 400ms 구간 난이도, §20) | 관리대상 |
-| `LazerSR.Hook\Drawables\` | 커스텀 drawable — StrainAreaGraph, MsdBarChart, ManiaJudgementLineOverlay/ManiaPressOverlay/ManiaJudgementSimulation(리플레이 판정 표시, `architecture.md` §9), ManiaJudgementScatterGraph(결과창 판정 산점도 + 구간 선택·연습, §12) | 관리대상 |
+| `LazerSR.Hook\Drawables\` | 커스텀 drawable — StrainAreaGraph, MsdBarChart, ManiaJudgementLineOverlay/ManiaPressOverlay/ManiaJudgementSimulation(리플레이 판정 표시, `architecture.md` §9), ManiaJudgementScatterGraph(결과창 판정 산점도 + 구간 선택·연습, §12), **DanResultRow/DanImages**(결과창 맵/퍼포먼스 dan 행, §24) | 관리대상 |
 | `LazerSR.Hook\Data\` | 불변 record 데이터 타입 + 화면 간 전달용 상태 슬롯(`ManiaSimulationState`, `ManiaOverlayVisibility` 등) | 관리대상 |
 | `LazerSR.Hook\PersonalSunny\` | 개인화 diff 파이프라인 — 큐/J캐시/적합결과 저장소, 모드 화이트리스트, `PersonalSunnyService`(굽기+적합 오케스트레이터), `Player.ImportScore` 자동 수집 패치. `architecture.md` §17 | **관리대상** (2026-08-19 신규) |
 | `LazerSR.Hook\LazerSrStorage.cs` | 개인 저장소(`%LocalAppData%\LazerSR\`) 경로/원자적 쓰기 유틸. 네임스페이스는 루트 고정(`architecture.md` §16) | 관리대상 |
@@ -68,6 +68,8 @@
 | `LazerSR.DanCalculator\` | mania-hub dan 분류 파이프라인 C# 포팅(~69파일). 진입점 `DanClassifier.ClassifyChart`(sync) / `.ClassifyChartWithCompanellaAsync`. 4K RC/LN·6K/7K sunny 테이블. `SunnyShim`만 osu.Game 참조. `architecture.md` §24 | **관리대상** (2026-09-10 신규) |
 | `LazerSR.DanCalculator\PORTING.md` | JS→C# 포팅 마스터 스펙(규칙표·모듈맵·sunny/MSD 치환 계약) | 보존 |
 | `LazerSR.DanCalculator\Assets\dan_model.onnx` | Companella 신경망(304KB). dan 인포 위젯이 사용, 로프 배포(§24) | 보존 |
+| `LazerSR.DanCalculator\Credit\PerformanceDan.cs` | 맵 dan + 판정카운트 → ScoreV1/V2 정확도 → dan-credit 곡선 → 퍼포먼스 dan (§24) | 관리대상 |
+| `LazerSR.Hook\Assets\dans\` | dan 뱃지 이미지 PNG 97개(mania-hub `public/images/dans/` SVG를 resvg로 256px 래스터화). 로프 배포(§24) | 관리대상 |
 
 ---
 

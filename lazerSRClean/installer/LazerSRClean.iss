@@ -1,5 +1,5 @@
 #define MyAppName "LazerSR"
-#define MyAppVersion "6.14.1"
+#define MyAppVersion "6.14.2"
 #define MyAppExeName "LazerSR.Launcher.exe"
 #define MyPublishDir "C:\dev\lazerSR\lazerSRClean\LazerSR.Launcher\bin\Release\net8.0-windows\win-x64\publish"
 
@@ -66,6 +66,9 @@ Source: "{#MyPublishDir}\dan_model.onnx"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyPublishDir}\Microsoft.ML.OnnxRuntime.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyPublishDir}\onnxruntime.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyPublishDir}\onnxruntime_providers_shared.dll"; DestDir: "{app}"; Flags: ignoreversion
+
+; dan 뱃지 아트워크 — <app>\dans\ 로프 (DanImages.cs가 경로로 로드)
+Source: "{#MyPublishDir}\dans\*"; DestDir: "{app}\dans"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

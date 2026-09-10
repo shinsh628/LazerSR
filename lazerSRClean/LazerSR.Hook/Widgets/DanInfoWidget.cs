@@ -212,7 +212,9 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
         if (!c.Supported || primary == null)
             return (string.Empty, string.Empty);
 
-        string main = $"{half(primary)}{(c.Vibro ? "  ⚠VIBRO" : "")}";
+        // Top line always tags RC (tap) vs LN so a 4K sub-10 verdict is not ambiguous.
+        string sideTag = primary.Kind == "ln" ? "LN" : "RC";
+        string main = $"{sideTag}  {half(primary)}{(c.Vibro ? "  ⚠VIBRO" : "")}";
 
         // Second line: the other half, shown only for hybrids where it differs.
         string detail = string.Empty;

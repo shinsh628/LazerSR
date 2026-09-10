@@ -1096,11 +1096,52 @@ within-1-tier 100%. <4★에서 발산(원인: `chart-classifier`의 `sunnyLowEn
   4K RC 저단(<9★)에서만 MSD(MinaCalc)+InterludeSR+ONNX가 실제로 돌고, 6/7K·≥9★·LN-main은
   `CompanellaPending`이 false라 sync 결과를 그대로 반환(추가 비용 없음). 전부 `Task.Run` + CTS 안이라
   UI를 막지 않고 다음 호버에서 취소된다.
-- 표시: **primary dan half(RC 또는 LN)의 DisplayName + tier variant(`--`~`++`) + 경계(`< `/`> `)
-  + vibro 마크뿐이다.** confidence %, BPM, 지배패턴 표시는 **제거됨**(2026-09-10 사용자 지시 —
-  confidence는 대부분 경로별 고정 상수라 정보량이 없었음). 하이브리드면 둘째 줄에 RC·LN 두 half.
+- 표시: **윗줄 = `{RC|LN}  {primary half DisplayName}` + tier variant(`--`~`++`) + 경계(`< `/`> `)
+  + vibro 마크.** RC/LN 태그는 4K 10단 이하에서 단놋/롱놋 dan 구분이 안 되던 문제로 추가(2026-09-10).
+  confidence %, BPM, 지배패턴 표시는 **제거됨**(경로별 고정 상수라 정보량 없음). 하이브리드면
+  둘째 줄에 RC·LN 두 half.
 - `mania`가 아니면 `N/A`.
-- **사용자 체감 변경은 이 위젯 하나뿐이다.** 스코어 제출·리플레이·서버 어디에도 dan을 아직 안 보낸다.
+
+### 결과창 dan 행 (`Drawables\DanResultRow.cs`, 2026-09-10 신규)
+
+결과창 확장 통계 패널(스페이스바)에서 **"Performance Breakdown"과 "Timing Distribution" 사이**에
+가로로 긴 행. 왼쪽 = 맵 dan, 오른쪽 = **퍼포먼스 dan**(맵 dan을 그 판의 정확도로 dan-credit 곡선에
+통과시킨 값). 각 칸은 뱃지 이미지 + 라벨. **임시 레이아웃 — 내용은 점점 추가 예정.**
+
+- 삽입은 **`ResultsJudgementScatterPatch`에 통합**했다 — `StatisticsPanel.CreateStatisticItems`에
+  `[HarmonyPatch]` 클래스는 하나만 걸 수 있다(ui-patching.md 함정 표). 산점도는 "Timing Distribution"
+  뒤, dan 행은 "Performance Breakdown" 뒤로 각각 이름으로 찾아 삽입.
+- `DanResultRow`가 BDL에서 `playableBeatmap`(osu!가 넘겨준 변환 완료 보면)을 재인코딩 →
+  `ClassifyChartWithCompanellaAsync` → `PerformanceDan.Compute(classification, 판정카운트)`.
+  `newScore`와 working beatmap만 읽는다.
+
+### 퍼포먼스 dan 계산 (`LazerSR.DanCalculator\Credit\PerformanceDan.cs`)
+
+```
+맵 dan(primary half의 RawDan)
+  + 판정카운트 → ScoreV1(300가중) / ScoreV2(305가중) 정확도   (shared/score.ts)
+  → DanClearBarFor(side, keyCount)  →  통화 맞춰 정확도 선택       (player-skills.ts danClearBarFor)
+  → DanCredit.CreditedDanFor(rawDan, accuracy, bar, side, keyCount) = 퍼포먼스 dan
+```
+
+pass bar: 4K RC 96%(stable) · 4K LN 97%(v2) · 6·7K RC 96%(Kyu 밴드 95%) · 6·7K LN 95%(stable).
+bar가 v2 통화면 ScoreV2 정확도로, 아니면 ScoreV1으로 검사한다. bar보다 창(rice 5%p / LN 3%p) 넘게
+낮으면 `PerformanceDan == null`(크레딧 없음).
+
+### dan 뱃지 이미지 (`Drawables\DanImages.cs`)
+
+mania-hub `src/lib/dan-images.ts` 포팅(`getDanImageSrc`/`danBareLabel`/`danScaleLabel`).
+파일은 `<app>\dans\` 로프 배포, `Assembly.Location` 기준으로 로드.
+
+- **mania-hub 원본은 SVG/webp** — osu! 렌더러는 래스터만 된다. `@resvg/resvg-js`로 256px PNG로
+  래스터화해 전부 동봉했다(`LazerSR.Hook\Assets\dans\`, 97개: reform 20 · ln 17 · 6k 30 · 7k 30).
+  재변환이 필요하면 mania-hub `public/images/dans/`가 원본.
+- `ResolveExisting`은 `dans\<경로>.png` → `.webp` 순으로 찾고 `.svg`는 무시한다. 없으면
+  `DanResultRow`가 텍스트로 폴백.
+- **`--`/`-`/`+`/`++` 티어는 별도 이미지가 아니다** — mania-hub도 뱃지(숫자/그리스자) 옆에
+  색 있는 지수(exponent) 텍스트로 붙인다. `DanImages.TierColour`(cool `#4db8ff`↔warm `#ef6f7f`)
+  포팅. `DanResultRow`가 뱃지 우상단에 그 색으로 표시. 퍼포먼스 dan은 연속값이라
+  `TierSuffix(pd)`로 소수부에서 티어를 뽑는다.
 
 ### Companella(ONNX) 배포
 
@@ -1119,5 +1160,6 @@ within-1-tier 100%. <4★에서 발산(원인: `chart-classifier`의 `sunnyLowEn
 
 - `LazerSR.DanCalculator.dll` — 로프 파일(Hook.dll과 같은 폴더, `DependencyResolver`가 resolve).
 - `dan_model.onnx`, `Microsoft.ML.OnnxRuntime.dll`, `onnxruntime.dll`, `onnxruntime_providers_shared.dll` — 로프.
+- `dans\**` — dan 뱃지 이미지(`.iss`는 `recursesubdirs`, Launcher는 RelativePath로 단일파일 제외).
 - 전부 `.iss [Files]` + Launcher `ExcludeHookDepsFromSingleFile` 양쪽에 등록.
 - MinaCalc.dll은 이미 배포되고 있어 추가 없음(DanCalculator도 같은 파일을 링크).
