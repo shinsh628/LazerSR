@@ -13,7 +13,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- 로컬 폴백 빌드용 기본 버전. CI는 태그에서 /p:Version=... 로 덮어쓴다 (docs\end.md 참고). -->
-    <Version>6.13.1</Version>
+    <Version>6.14.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -37,6 +37,18 @@
     </ItemGroup>
   </Target>
 
+  <!-- Companella (ONNX dan model) is ported but not yet wired into any live path
+       (step 5 — score collection). Keep its ~11 MB native runtime + model out of
+       the release until then. Re-enable by deleting this target and adding the
+       loose files to installer\LazerSRClean.iss. -->
+  <Target Name="DropUnusedOnnxFromPublish" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+          Condition="$([System.String]::Copy('%(ResolvedFileToPublish.Filename)').ToLowerInvariant().Contains('onnxruntime'))
+                   Or '%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)' == 'dan_model.onnx'" />
+    </ItemGroup>
+  </Target>
+
   <Target Name="ExcludeHookDepsFromSingleFile"
           AfterTargets="ComputeResolvedFilesToPublishList"
           BeforeTargets="_ComputeResolvedFilesToPublishTypes">
@@ -44,6 +56,7 @@
       <_HookFiles Include="@(ResolvedFileToPublish)"
           Condition="('%(ResolvedFileToPublish.Filename)' == 'LazerSR.Hook'
                    Or '%(ResolvedFileToPublish.Filename)' == 'LazerSR.SunnyCalculator'
+                   Or '%(ResolvedFileToPublish.Filename)' == 'LazerSR.DanCalculator'
                    Or '%(ResolvedFileToPublish.Filename)' == '0Harmony'
                    Or '%(ResolvedFileToPublish.Filename)' == 'MonoMod.Backports'
                    Or '%(ResolvedFileToPublish.Filename)' == 'MonoMod.Core'

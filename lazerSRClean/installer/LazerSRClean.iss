@@ -1,5 +1,5 @@
 #define MyAppName "LazerSR"
-#define MyAppVersion "6.13.1"
+#define MyAppVersion "6.14.0"
 #define MyAppExeName "LazerSR.Launcher.exe"
 #define MyPublishDir "C:\dev\lazerSR\lazerSRClean\LazerSR.Launcher\bin\Release\net8.0-windows\win-x64\publish"
 
@@ -43,6 +43,7 @@ Source: "{#MyPublishDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversio
 ; Hook DLL — DOTNET_STARTUP_HOOKS 실제 파일 경로 필요 (번들 외부 필수)
 Source: "{#MyPublishDir}\LazerSR.Hook.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyPublishDir}\LazerSR.SunnyCalculator.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyPublishDir}\LazerSR.DanCalculator.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 ; HarmonyX 런타임 — DependencyResolver가 exe 폴더에서 로드
 Source: "{#MyPublishDir}\0Harmony.dll"; DestDir: "{app}"; Flags: ignoreversion

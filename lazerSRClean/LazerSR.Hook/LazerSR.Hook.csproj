@@ -14,6 +14,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LazerSR.SunnyCalculator\LazerSR.SunnyCalculator.csproj" />
+    <ProjectReference Include="..\LazerSR.DanCalculator\LazerSR.DanCalculator.csproj" />
     <ProjectReference Include="..\..\osu\osu.Game\osu.Game.csproj" Private="false" ReferenceOutputAssembly="true" />
     <ProjectReference Include="..\..\osu\osu.Game.Rulesets.Mania\osu.Game.Rulesets.Mania.csproj" Private="false" ReferenceOutputAssembly="true" />
   </ItemGroup>

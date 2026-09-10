@@ -252,6 +252,9 @@ public static void Postfix(ScoreInfo newScore, ref IEnumerable<StatisticItem> __
 
 ## 계산기(Calculator) 작성 규칙
 
+- **dan 계산은 예외** — `LazerSR.DanCalculator` 독립 프로젝트(mania-hub 포팅)에 있다. 진입점은
+  `DanClassifier.ClassifyChart(osuText, input)` (sync). `string osuText` 기반이라 Hook에서 부르려면
+  `LegacyBeatmapEncoder`로 재인코딩한다(`DanInfoWidget`이 실제 사례). 상세 `architecture.md` §24
 - 위치: `LazerSR.Hook\Calculators\`
 - Static 클래스, static `Calculate(...)` 메서드
 - `if (beatmap is not ManiaBeatmap) return ...;` 가드

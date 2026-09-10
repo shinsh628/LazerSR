@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <!-- The port mirrors JS number semantics (all doubles). Keep overflow unchecked like JS. -->
+    <CheckForOverflowUnderflow>false</CheckForOverflowUnderflow>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ONNX runtime for the Companella dan model. Native, ships loose like MinaCalc.dll. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Companella neural model. Copied next to the assembly; loaded by path at runtime. -->
+    <None Include="Assets\dan_model.onnx" Condition="Exists('Assets\dan_model.onnx')">
+      <Link>dan_model.onnx</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- MinaCalc native lib for MSD (4K RC marathon correction + Companella features). -->
+    <None Include="..\LazerSR.Hook\MinaCalc.dll">
+      <Link>MinaCalc.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Sunny substitution: the dan classifier's 6K/7K path and Roxy/Azusa sunny references
+         call our own sunny instead of porting LeoBlack's sunnyAlgorithm.js. See PORTING.md §Sunny. -->
+    <ProjectReference Include="..\LazerSR.SunnyCalculator\LazerSR.SunnyCalculator.csproj" />
+    <!-- osu.Game types are needed ONLY by the IBeatmap -> osuText adapter (SunnyShim / Hook glue).
+         The ported estimator/classifier code itself must not touch osu.Game. -->
+    <ProjectReference Include="..\..\osu\osu.Game\osu.Game.csproj" Private="false" ReferenceOutputAssembly="true" />
+    <ProjectReference Include="..\..\osu\osu.Game.Rulesets.Mania\osu.Game.Rulesets.Mania.csproj" Private="false" ReferenceOutputAssembly="true" />
+  </ItemGroup>
+</Project>

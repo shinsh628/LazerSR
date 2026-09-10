@@ -35,7 +35,6 @@
 | `docs\sibling-clone-position-map.md` | 위치별(1.1~4.2) sunnySR pill 구현 진행 상황 | **관리대상** |
 | `docs\replay-compare-widget-plan.md` | 리플레이 비교 위젯 미니 프로젝트 현황 | 관리대상 |
 | `docs\skin-widget-research.md` | osu! 스킨 위젯 시스템 API 레퍼런스 | 보존 (osu! API 자체 서술, 우리 코드 변경과 무관) |
-| `docs\SunnyToDan.txt` | `DanCalculator.cs`의 DAN_NAMES/DAN_THRESHOLDS 원본 출처 데이터 | 보존 |
 | `docs\widget-mockup.html` | `ReplayCompareWidget` 설정값 시뮬레이션용 HTML 모업 | 보존 |
 | `docs\mockup.json` | `ReplayCompareWidget` 기본값 정의 | 보존 |
 | `progress\` | 날짜별 작업 일지 (`YYYY-MM-DD.md`) — 실제 작업의 유일한 확정 기록 | **관리대상**, 계속 추가됨 |
@@ -43,7 +42,7 @@
 | `installer\output\` | 컴파일된 `LazerSR-v{version}-Setup.exe` | 재생성 가능 (커밋 대상 아님) |
 | `LazerSR.Hook\` | osu! 프로세스에 주입되는 Class Library (net8.0) | **관리대상** |
 | `LazerSR.Hook\Patches\` | HarmonyX 패치 클래스들 — 목록은 `architecture.md` §4 | 관리대상 |
-| `LazerSR.Hook\Calculators\` | sunnySR/MSD/Dan/replay-timeline/결과창 구간 분석(`ManiaSectionAnalysis`) 등 계산 로직 | 관리대상 |
+| `LazerSR.Hook\Calculators\` | sunnySR/MSD/replay-timeline/결과창 구간 분석(`ManiaSectionAnalysis`)/패턴 BPM 등 계산 로직. **dan은 여기 없다** — `LazerSR.DanCalculator` 프로젝트로 이동(구 `DanCalculator.cs` sunny→임계 방식 폐기, 2026-09-10) | 관리대상 |
 | `LazerSR.Hook\Screens\` | 무한 트레이닝 화면/시드 비트맵 + 결과창 구간 연습(`SectionPractice*`) + **패턴 복제 화면/시드 비트맵(`PatternCopy*`)** — 전부 `OsuScreen`/`Player`/`WorkingBeatmap` 파생. 로컬 전용 로더 마커 `ILocalOnlyPlayerLoader` 포함 | 관리대상 |
 | `LazerSR.Hook\PatternCopy\` | **패턴 복제 모드** — 외부 프로그램(newScreen)이 파이프로 보내온 노트를 실시간 주입. 명령 큐(`PatternCopyBridge`)·주입기·**롱노트 런타임 절단**(`HoldNoteTruncator`)·세션 상태 + **비포커스 프레임 유지**(`InactiveFrameRateOverride`). `architecture.md` §19 | **관리대상** (2026-08-21 신규) |
 | `LazerSR.Hook\Input\` | 비포커스 상태에서 하드웨어 키를 받아 프레임워크 입력 큐에 넣는 릴레이(Raw Input `RIDEV_INPUTSINK`). **패턴 복제 모드 전용이며 그 화면의 수명에 묶여 있다** — `safety.md` 참고 | **관리대상** (2026-08-21 신규) |
@@ -66,6 +65,9 @@
 | `LazerSR.SunnyCalculator\` | 독립 sunnySR 계산 파이프라인 (osu! `DifficultyCalculator` 비상속) | **관리대상** |
 | `LazerSR.SunnyCalculator\Difficulty\` | sunnyosu에서 이식된 skill/evaluator/preprocessor | 관리대상 |
 | `LazerSR.SunnyCalculator\Tuning\` | sunny 상수 39개 + 만인/개인화 diff + `WithIsolatedDiff` 격리 계층 + 개인화 fit 솔버/굽기. `architecture.md` §17 | **관리대상** (2026-08-19 확장) |
+| `LazerSR.DanCalculator\` | mania-hub dan 분류 파이프라인 C# 포팅(~69파일). 진입점 `DanClassifier.ClassifyChart`(sync) / `.ClassifyChartWithCompanellaAsync`. 4K RC/LN·6K/7K sunny 테이블. `SunnyShim`만 osu.Game 참조. `architecture.md` §24 | **관리대상** (2026-09-10 신규) |
+| `LazerSR.DanCalculator\PORTING.md` | JS→C# 포팅 마스터 스펙(규칙표·모듈맵·sunny/MSD 치환 계약) | 보존 |
+| `LazerSR.DanCalculator\Assets\dan_model.onnx` | Companella 신경망(304KB). **현재 배포 제외** — Companella는 아직 라이브 경로에 미연결(§24) | 보존 |
 
 ---
 
@@ -74,9 +76,13 @@
 ```
 LazerSR.Launcher.csproj → ProjectReference → LazerSR.Hook.csproj
 LazerSR.Hook.csproj      → ProjectReference → LazerSR.SunnyCalculator.csproj
+                          → ProjectReference → LazerSR.DanCalculator.csproj
                           → ProjectReference(Private=false) → ..\..\osu\osu.Game\osu.Game.csproj
                                                               → ..\..\osu\osu.Game.Rulesets.Mania\...csproj
 LazerSR.SunnyCalculator.csproj → ProjectReference(Private=false) → 위와 동일 osu 경로
+LazerSR.DanCalculator.csproj   → ProjectReference → LazerSR.SunnyCalculator.csproj
+                              → ProjectReference(Private=false) → 위와 동일 osu 경로
+                              → PackageReference → Microsoft.ML.OnnxRuntime (Companella 전용, 현재 배포 strip)
 ```
 
 `osu\`가 없으면 `lazerSRClean` 전체가 빌드되지 않는다 — 절대 삭제 금지. `sunnyosu\`는 위 그래프 어디에도 안 걸린다(2026-08-19 확인) — 없어도 빌드된다, 삭제해도 무방하지만 과거 이식 근거로 보존 중.

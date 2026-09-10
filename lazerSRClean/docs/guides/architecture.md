@@ -1050,3 +1050,65 @@ Prefix `return false` 정당화: `LocalOnlyLeaderboardSkipPatch` 선례와 동�
   이 둘이 되면 osu 네이티브 `ModIcon` 확장정보(`1.20x` 플레이트)가 자동으로 뜬다.
 - 다운로드 후 `ScoreDownloadTracker`가 realm 매칭을 못 해 버튼이 "download" 상태로 남음(G-1) — 재클릭 시 재임포트(osu importer가 파일 해시로 멱등)
 - osu 안에서의 실제 동작(패치 발동, 파이프 왕복, 결과창 진입)은 빌드/정적 검증만 — 실사용 QA 필요
+
+---
+
+## 24. dan 분류기 — `LazerSR.DanCalculator` (2026-09-10 신규, v6.14.0)
+
+곡 선택 화면 dan 인포 위젯의 dan 계산을 **sunny→임계 테이블**(구 `LazerSR.Hook\Calculators\DanCalculator.cs`,
+`DAN_NAMES`/`DAN_THRESHOLDS` 20단계)에서 **mania-hub의 dan 분류 파이프라인**(벤더링된 LeoBlack 엔진)으로
+교체했다. 전체 포팅 경위는 `progress\2026-09-10.md`, 포팅 스펙은 `LazerSR.DanCalculator\PORTING.md`.
+
+### 프로젝트 구조
+
+`LazerSR.DanCalculator\`는 `LazerSR.SunnyCalculator`와 동급 프로젝트로, Hook이 `ProjectReference`한다.
+osu.Game는 **`Estimators\SunnyShim.cs` 한 파일만** 참조한다(`.osu` 텍스트 ↔ `ManiaBeatmap` 어댑터).
+나머지 ~68파일은 전부 `string osuText` 기반 순수 계산이다.
+
+| 진입점 | 용도 |
+|---|---|
+| `DanClassifier.ClassifyChart(osuText, input)` | **sync. dan 인포 위젯이 쓰는 경로.** Companella(ONNX) 없음 |
+| `DanClassifier.ClassifyChartWithCompanellaAsync(...)` | async. MSD(MinaCalc)+InterludeSR+ONNX 추론까지. **아직 라이브 경로에 미연결** — 스텝 5(스코어 수집)에서 붙인다 |
+
+라우팅(`ChartClassifier.ClassifyChart`):
+- **4K RC** → LeoBlack Mixed(Roxy→Azusa→Daniel 블렌드, 전부 우리 sunny 기준)
+- **4K LN** → LeoBlack LN 테이블, 그 아래는 자체 LN kNN(127엔트리 코퍼스)
+- **6K/7K** → 우리 sunny star를 6K/7K dan 인터벌 테이블로 매핑(`Intervals\Tables.cs`)
+- 그 외 키수 → dan 판정 없음(`Supported = false`)
+
+### sunny는 우리 것을 유지한다
+
+LeoBlack `sunnyAlgorithm.js`로 교체하지 않는다. 실측상 우리 바닐라 sunny와 ≥4★에서 `mean|Δ| 0.037`로
+일치하고(<3★에서만 LeoBlack이 저SR을 들어올림), sunny+ 개인화 시스템(§17)이 우리 sunny에 용접돼 있어
+교체 비용이 크다. `SunnyShim`이 `SunnyConstants.WithIsolatedDiff(zero, forceVanillaTail:true)`로
+**만인/개인 diff·temp-nerf tail을 모두 끈 순수 바닐라 sunny**를 돌려 LeoBlack 엔진에 먹인다.
+
+**검증 범위(2026-09-10)**: 4K 랜덤 코퍼스 스모크 테스트에서 우리 sunny ≥4★ 구간 base-dan 일치 95%,
+within-1-tier 100%. <4★에서 발산(원인: `chart-classifier`의 `sunnyLowEndReroute` 저단 가드가 우리 sunny
+저SR 리드에서 과발동). 6/7K·Companella async·dan-credit 곡선은 코드 경로만 확인, 실측 미검증.
+
+### dan 인포 위젯 (`Widgets\DanInfoWidget.cs`)
+
+- 위젯이 `WorkingBeatmap`(선곡) 또는 `GameplayState.Beatmap`(인게임)을 **`LegacyBeatmapEncoder`로
+  `.osu` 텍스트로 재인코딩**해서 `DanClassifier.ClassifyChart`에 넘긴다. DanCalculator 전체가
+  텍스트 기반이라 IBeatmap 직접 경로가 없다.
+- 표시: primary dan(RC 또는 LN half), tier variant(`--`~`++`), 경계(`< `/`> `), confidence %, vibro 마크.
+  하이브리드면 RC·LN 두 half를 다 보여준다. 기존 BPM/dominant 꼬리표는 유지(`SunnyState.CurrentDominant`
+  + `PatternBpmCalculator`, 변경 없음).
+- `mania`가 아니면 `N/A`. rate 모드가 바뀌면 재분류(`ClassifyChartInput.Rate`).
+- **사용자 체감 변경은 이 위젯 하나뿐이다.** 스코어 제출·리플레이·서버 어디에도 dan을 아직 안 보낸다.
+
+### Companella(ONNX) 배포 보류
+
+`Assets\dan_model.onnx`(304KB) + `Microsoft.ML.OnnxRuntime` 네이티브(~11MB)는 **현재 릴리스에서 제외**한다
+(`LazerSR.Launcher.csproj`의 `DropUnusedOnnxFromPublish` 타깃이 publish 산출물에서 걷어냄).
+sync 경로는 ONNX를 절대 로드하지 않으므로 무해하고, 만에 하나 async가 불려도 `Companella.cs` try/catch가
+`null`로 degrade한다. 스텝 5에서 이 타깃을 지우고 `.iss [Files]`에 로프 파일 3개(model + onnxruntime
+네이티브 + managed dll)를 추가하면 켜진다. `CompanellaEstimator.ResolveModelPath()`는 이미
+`MinaCalcNative`와 같은 방식(어셈블리 위치 우선, osu! 설치 경로 폴백)으로 모델을 찾는다.
+
+### 배포에 추가된 것 (§8 보강)
+
+- `LazerSR.DanCalculator.dll` — 로프 파일(Hook.dll과 같은 폴더, `DependencyResolver`가 resolve).
+  `.iss [Files]` + `LazerSR.Launcher.csproj`의 `ExcludeHookDepsFromSingleFile` 목록에 추가됨.
+- MinaCalc.dll은 이미 배포되고 있어 추가 없음(DanCalculator도 같은 파일을 링크).
