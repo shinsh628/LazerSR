@@ -1,5 +1,5 @@
 #define MyAppName "LazerSR"
-#define MyAppVersion "6.14.0"
+#define MyAppVersion "6.14.1"
 #define MyAppExeName "LazerSR.Launcher.exe"
 #define MyPublishDir "C:\dev\lazerSR\lazerSRClean\LazerSR.Launcher\bin\Release\net8.0-windows\win-x64\publish"
 
@@ -60,6 +60,12 @@ Source: "{#MyPublishDir}\Mono.Cecil.Rocks.dll"; DestDir: "{app}"; Flags: ignorev
 
 ; MinaCalc 네이티브 DLL — P/Invoke로 로드 (Hook.dll과 같은 폴더 필수)
 Source: "{#MyPublishDir}\MinaCalc.dll"; DestDir: "{app}"; Flags: ignoreversion
+
+; Companella dan 모델 (ONNX) — DanInfoWidget가 4K RC 저단 verdict 정제에 사용 (architecture.md §24)
+Source: "{#MyPublishDir}\dan_model.onnx"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyPublishDir}\Microsoft.ML.OnnxRuntime.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyPublishDir}\onnxruntime.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyPublishDir}\onnxruntime_providers_shared.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

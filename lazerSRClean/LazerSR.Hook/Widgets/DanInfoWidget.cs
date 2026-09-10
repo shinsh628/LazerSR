@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using LazerSR.DanCalculator;
 using LazerSR.DanCalculator.Classifier;
-using LazerSR.Hook.Calculators;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
 using osu.Framework.Graphics;
@@ -27,9 +26,8 @@ namespace LazerSR.Hook.Widgets;
 /// <summary>
 /// Difficulty-info skin widget. The dan verdict comes from the ported mania-hub
 /// classifier (<see cref="DanClassifier"/>) — 4K RC/LN halves, 6K/7K sunny tables,
-/// tier / boundary / confidence / vibro. The sync path is used (no Companella
-/// ONNX): for low 4K RC charts that leaves the unrefined sunny fallback, which is
-/// fine for a passive readout.
+/// tier / boundary / vibro. Runs the Companella (ONNX) refinement pass on every
+/// map/mod change, same cadence as the old sunny→threshold readout.
 /// </summary>
 public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
 {
@@ -47,24 +45,15 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
     [Resolved(canBeNull: true)]
     private IBindable<IReadOnlyList<Mod>>? mods { get; set; }
 
-    // Local bindable so osu! framework auto-unbinds on dispose (prevents stale static callbacks)
-    private readonly Bindable<string> _dominant = new();
-
     private OsuSpriteText danLine = null!;
     private OsuSpriteText detailLine = null!;
     private CancellationTokenSource? cts;
     private ModSettingChangeTracker? _modTracker;
 
-    // Cached raw results from the last full classification (no rate applied to BPM).
-    private int _rawBpm;
-    private string _danLine = string.Empty;     // e.g. "Epsilon +  (72%)"
-    private string _detailBase = string.Empty;  // e.g. "RC Epsilon + · LN LN 12"  (BPM/dominant appended live)
-    private string _dominantAbbr = string.Empty;
-
     public DanInfoWidget()
     {
-        Width = 260;
-        Height = 44;
+        Width = 220;
+        Height = 40;
     }
 
     [BackgroundDependencyLoader]
@@ -80,18 +69,18 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
             },
             danLine = new OsuSpriteText
             {
-                Anchor = Anchor.TopCentre,
-                Origin = Anchor.TopCentre,
-                Y = 3,
+                Anchor = Anchor.Centre,
+                Origin = Anchor.Centre,
+                Y = -6,
                 Font = OsuFont.Default.With(size: 15f, weight: FontWeight.SemiBold),
                 Text = "Dan Info",
                 Alpha = 0.6f,
             },
             detailLine = new OsuSpriteText
             {
-                Anchor = Anchor.BottomCentre,
-                Origin = Anchor.BottomCentre,
-                Y = -3,
+                Anchor = Anchor.Centre,
+                Origin = Anchor.Centre,
+                Y = 9,
                 Font = OsuFont.Default.With(size: 11f),
                 Alpha = 0.6f,
             },
@@ -108,9 +97,6 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
             return;
         }
 
-        _dominant.BindTo(SunnyState.CurrentDominant);
-        _dominant.BindValueChanged(_ => triggerRecalculate());
-
         workingBeatmap?.BindValueChanged(_ => triggerRecalculate());
 
         mods?.BindValueChanged(e =>
@@ -120,30 +106,6 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
             _modTracker.SettingChanged += _ => triggerRecalculate();
             triggerRecalculate();
         }, true);
-    }
-
-    // Runs on the update thread — appends the rate-scaled BPM + dominant to the cached lines.
-    private void updateDisplay()
-    {
-        if (string.IsNullOrEmpty(_danLine))
-        {
-            danLine.Text = "N/A";
-            detailLine.Text = string.Empty;
-            danLine.Alpha = 0.6f;
-            detailLine.Alpha = 0.6f;
-            return;
-        }
-
-        double rate = GetRate(mods?.Value);
-        int bpm = _rawBpm > 0 ? (int)Math.Round(_rawBpm * rate) : 0;
-        string tail = bpm > 0
-            ? $" · {bpm}BPM{(string.IsNullOrEmpty(_dominantAbbr) ? "" : " " + _dominantAbbr)}"
-            : string.Empty;
-
-        danLine.Text = _danLine;
-        detailLine.Text = _detailBase + tail;
-        danLine.Alpha = 1f;
-        detailLine.Alpha = 0.85f;
     }
 
     private static double GetRate(IReadOnlyList<Mod>? mods)
@@ -168,9 +130,8 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
         var rs = ruleset?.Value;
         double rate = GetRate(mods?.Value);
         double? starRating = wb?.BeatmapInfo.StarRating;
-        string dominantAbbr = SunnyState.CurrentDominant.Value;
 
-        Task.Run(() =>
+        Task.Run(async () =>
         {
             try
             {
@@ -189,27 +150,26 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
 
                 if (playable is not ManiaBeatmap)
                 {
-                    publish(token, string.Empty, string.Empty, 0, string.Empty);
+                    publish(token, string.Empty, string.Empty);
                     return;
                 }
 
                 string osuText = encodeToOsu(playable);
                 token.ThrowIfCancellationRequested();
 
-                var classification = DanClassifier.ClassifyChart(osuText, new ClassifyChartInput
+                var input = new ClassifyChartInput
                 {
                     Rate = rate,
                     StarRating = double.IsFinite(starRating ?? double.NaN) ? starRating : null,
-                });
+                };
+                var classification = await DanClassifier
+                    .ClassifyChartWithCompanellaAsync(osuText, input)
+                    .ConfigureAwait(false);
 
-                token.ThrowIfCancellationRequested();
+                if (token.IsCancellationRequested) return;
 
                 var (main, detail) = format(classification);
-                int rawBpm = string.IsNullOrEmpty(dominantAbbr) || dominantAbbr == "N/A"
-                    ? 0
-                    : PatternBpmCalculator.GetMaxBpm(playable, dominantAbbr);
-
-                publish(token, main, detail, rawBpm, dominantAbbr);
+                publish(token, main, detail);
             }
             catch (OperationCanceledException) { }
             catch (Exception e)
@@ -219,16 +179,23 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
         }, token);
     }
 
-    private void publish(CancellationToken token, string main, string detail, int rawBpm, string abbr)
+    private void publish(CancellationToken token, string main, string detail)
     {
         Schedule(() =>
         {
             if (token.IsCancellationRequested) return;
-            _danLine = main;
-            _detailBase = detail;
-            _rawBpm = rawBpm;
-            _dominantAbbr = abbr;
-            updateDisplay();
+            if (string.IsNullOrEmpty(main))
+            {
+                danLine.Text = "N/A";
+                detailLine.Text = string.Empty;
+                danLine.Alpha = 0.6f;
+                return;
+            }
+
+            danLine.Text = main;
+            detailLine.Text = detail;
+            danLine.Alpha = 1f;
+            detailLine.Alpha = string.IsNullOrEmpty(detail) ? 0f : 0.85f;
         });
     }
 
@@ -245,17 +212,12 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
         if (!c.Supported || primary == null)
             return (string.Empty, string.Empty);
 
-        string main = $"{boundaryMark(primary.Boundary)}{primary.DisplayName}";
-        int conf = (int)Math.Round(Math.Clamp(primary.Confidence, 0, 1) * 100);
-        main += $"  ({conf}%)";
-        if (c.Vibro) main += "  ⚠VIBRO";
+        string main = $"{half(primary)}{(c.Vibro ? "  ⚠VIBRO" : "")}";
 
-        // Detail: show both halves when the chart is a hybrid and they differ.
-        string detail;
+        // Second line: the other half, shown only for hybrids where it differs.
+        string detail = string.Empty;
         if (c.Rc != null && c.Ln != null && half(c.Rc) != half(c.Ln))
-            detail = $"RC {half(c.Rc)} · LN {half(c.Ln)}";
-        else
-            detail = primary.Kind == "ln" ? "LN" : $"{c.KeyCount}K RC";
+            detail = $"RC {half(c.Rc)}  ·  LN {half(c.Ln)}";
 
         return (main, detail);
     }

@@ -21,6 +21,7 @@
 //   float representation; away-from-zero at 2dp matches in every realistic case.
 
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -68,6 +69,7 @@ public static class CompanellaEstimator
 
     private static readonly object _sessionLock = new();
     private static InferenceSession? _session;
+    private static bool _nativeResolverInstalled;
 
     private static InferenceSession Session()
     {
@@ -75,8 +77,39 @@ public static class CompanellaEstimator
         if (s != null) return s;
         lock (_sessionLock)
         {
-            return _session ??= new InferenceSession(ResolveModelPath());
+            if (_session != null) return _session;
+            InstallNativeResolver();
+            return _session = new InferenceSession(ResolveModelPath());
         }
+    }
+
+    // Microsoft.ML.OnnxRuntime P/Invokes the native "onnxruntime" library. When the
+    // Hook is injected into osu!, the default probe dirs are osu!'s — so point it at
+    // our loose deployment (next to this assembly), mirroring MinaCalcNative.
+    private static void InstallNativeResolver()
+    {
+        if (_nativeResolverInstalled) return;
+        _nativeResolverInstalled = true;
+
+        NativeLibrary.SetDllImportResolver(typeof(InferenceSession).Assembly, (name, _, _) =>
+        {
+            if (!name.Contains("onnxruntime", StringComparison.OrdinalIgnoreCase))
+                return IntPtr.Zero;
+
+            var dirs = new[]
+            {
+                Path.GetDirectoryName(typeof(CompanellaEstimator).Assembly.Location),
+                AppContext.BaseDirectory,
+            };
+            foreach (var dir in dirs)
+            {
+                if (string.IsNullOrEmpty(dir)) continue;
+                string candidate = Path.Combine(dir, name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? name : name + ".dll");
+                if (File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out var handle))
+                    return handle;
+            }
+            return IntPtr.Zero;
+        });
     }
 
     // The model ships loose beside this assembly (like MinaCalc.dll). When the Hook

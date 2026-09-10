@@ -1067,8 +1067,8 @@ osu.Game는 **`Estimators\SunnyShim.cs` 한 파일만** 참조한다(`.osu` 텍�
 
 | 진입점 | 용도 |
 |---|---|
-| `DanClassifier.ClassifyChart(osuText, input)` | **sync. dan 인포 위젯이 쓰는 경로.** Companella(ONNX) 없음 |
-| `DanClassifier.ClassifyChartWithCompanellaAsync(...)` | async. MSD(MinaCalc)+InterludeSR+ONNX 추론까지. **아직 라이브 경로에 미연결** — 스텝 5(스코어 수집)에서 붙인다 |
+| `DanClassifier.ClassifyChart(osuText, input)` | sync. Companella(ONNX) 없음 |
+| `DanClassifier.ClassifyChartWithCompanellaAsync(...)` | async. MSD(MinaCalc)+InterludeSR+ONNX 추론까지. **dan 인포 위젯이 이 경로를 쓴다**(2026-09-10, 매 맵/모드 갱신) |
 
 라우팅(`ChartClassifier.ClassifyChart`):
 - **4K RC** → LeoBlack Mixed(Roxy→Azusa→Daniel 블렌드, 전부 우리 sunny 기준)
@@ -1090,25 +1090,34 @@ within-1-tier 100%. <4★에서 발산(원인: `chart-classifier`의 `sunnyLowEn
 ### dan 인포 위젯 (`Widgets\DanInfoWidget.cs`)
 
 - 위젯이 `WorkingBeatmap`(선곡) 또는 `GameplayState.Beatmap`(인게임)을 **`LegacyBeatmapEncoder`로
-  `.osu` 텍스트로 재인코딩**해서 `DanClassifier.ClassifyChart`에 넘긴다. DanCalculator 전체가
-  텍스트 기반이라 IBeatmap 직접 경로가 없다.
-- 표시: primary dan(RC 또는 LN half), tier variant(`--`~`++`), 경계(`< `/`> `), confidence %, vibro 마크.
-  하이브리드면 RC·LN 두 half를 다 보여준다. 기존 BPM/dominant 꼬리표는 유지(`SunnyState.CurrentDominant`
-  + `PatternBpmCalculator`, 변경 없음).
-- `mania`가 아니면 `N/A`. rate 모드가 바뀌면 재분류(`ClassifyChartInput.Rate`).
+  `.osu` 텍스트로 재인코딩**해서 `DanClassifier.ClassifyChartWithCompanellaAsync`에 넘긴다.
+  DanCalculator 전체가 텍스트 기반이라 IBeatmap 직접 경로가 없다.
+- **Companella(ONNX) 정제를 매 맵/모드 갱신마다 돈다** — 구 sunny→임계 readout과 같은 주기.
+  4K RC 저단(<9★)에서만 MSD(MinaCalc)+InterludeSR+ONNX가 실제로 돌고, 6/7K·≥9★·LN-main은
+  `CompanellaPending`이 false라 sync 결과를 그대로 반환(추가 비용 없음). 전부 `Task.Run` + CTS 안이라
+  UI를 막지 않고 다음 호버에서 취소된다.
+- 표시: **primary dan half(RC 또는 LN)의 DisplayName + tier variant(`--`~`++`) + 경계(`< `/`> `)
+  + vibro 마크뿐이다.** confidence %, BPM, 지배패턴 표시는 **제거됨**(2026-09-10 사용자 지시 —
+  confidence는 대부분 경로별 고정 상수라 정보량이 없었음). 하이브리드면 둘째 줄에 RC·LN 두 half.
+- `mania`가 아니면 `N/A`.
 - **사용자 체감 변경은 이 위젯 하나뿐이다.** 스코어 제출·리플레이·서버 어디에도 dan을 아직 안 보낸다.
 
-### Companella(ONNX) 배포 보류
+### Companella(ONNX) 배포
 
-`Assets\dan_model.onnx`(304KB) + `Microsoft.ML.OnnxRuntime` 네이티브(~11MB)는 **현재 릴리스에서 제외**한다
-(`LazerSR.Launcher.csproj`의 `DropUnusedOnnxFromPublish` 타깃이 publish 산출물에서 걷어냄).
-sync 경로는 ONNX를 절대 로드하지 않으므로 무해하고, 만에 하나 async가 불려도 `Companella.cs` try/catch가
-`null`로 degrade한다. 스텝 5에서 이 타깃을 지우고 `.iss [Files]`에 로프 파일 3개(model + onnxruntime
-네이티브 + managed dll)를 추가하면 켜진다. `CompanellaEstimator.ResolveModelPath()`는 이미
-`MinaCalcNative`와 같은 방식(어셈블리 위치 우선, osu! 설치 경로 폴백)으로 모델을 찾는다.
+`Assets\dan_model.onnx`(304KB) + `onnxruntime.dll`/`onnxruntime_providers_shared.dll`(~13MB) +
+`Microsoft.ML.OnnxRuntime.dll`(managed)을 전부 **로프 파일로 배포**한다
+(`.iss [Files]` + `LazerSR.Launcher.csproj`의 `ExcludeHookDepsFromSingleFile` 목록).
+
+- `CompanellaEstimator.ResolveModelPath()` — 모델을 어셈블리 위치 우선(+`Assets\` 하위) → BaseDirectory 폴백으로 찾음.
+- `CompanellaEstimator.InstallNativeResolver()` — `Microsoft.ML.OnnxRuntime` 어셈블리의 `[DllImport("onnxruntime")]`
+  네이티브 로드를 우리 로프 배포로 리다이렉트(`NativeLibrary.SetDllImportResolver`, `MinaCalcNative`와 동일 패턴).
+  osu! 프로세스 안에서는 기본 프로브 경로가 osu! 설치 폴더라 이게 필요하다.
+- 세션은 프로세스 수명 1개(`InferenceSession`), lazy 생성, dispose 안 함. Companella가 실제로 불릴 때만
+  ONNX 어셈블리가 로드된다.
 
 ### 배포에 추가된 것 (§8 보강)
 
 - `LazerSR.DanCalculator.dll` — 로프 파일(Hook.dll과 같은 폴더, `DependencyResolver`가 resolve).
-  `.iss [Files]` + `LazerSR.Launcher.csproj`의 `ExcludeHookDepsFromSingleFile` 목록에 추가됨.
+- `dan_model.onnx`, `Microsoft.ML.OnnxRuntime.dll`, `onnxruntime.dll`, `onnxruntime_providers_shared.dll` — 로프.
+- 전부 `.iss [Files]` + Launcher `ExcludeHookDepsFromSingleFile` 양쪽에 등록.
 - MinaCalc.dll은 이미 배포되고 있어 추가 없음(DanCalculator도 같은 파일을 링크).

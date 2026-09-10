@@ -67,7 +67,7 @@
 | `LazerSR.SunnyCalculator\Tuning\` | sunny 상수 39개 + 만인/개인화 diff + `WithIsolatedDiff` 격리 계층 + 개인화 fit 솔버/굽기. `architecture.md` §17 | **관리대상** (2026-08-19 확장) |
 | `LazerSR.DanCalculator\` | mania-hub dan 분류 파이프라인 C# 포팅(~69파일). 진입점 `DanClassifier.ClassifyChart`(sync) / `.ClassifyChartWithCompanellaAsync`. 4K RC/LN·6K/7K sunny 테이블. `SunnyShim`만 osu.Game 참조. `architecture.md` §24 | **관리대상** (2026-09-10 신규) |
 | `LazerSR.DanCalculator\PORTING.md` | JS→C# 포팅 마스터 스펙(규칙표·모듈맵·sunny/MSD 치환 계약) | 보존 |
-| `LazerSR.DanCalculator\Assets\dan_model.onnx` | Companella 신경망(304KB). **현재 배포 제외** — Companella는 아직 라이브 경로에 미연결(§24) | 보존 |
+| `LazerSR.DanCalculator\Assets\dan_model.onnx` | Companella 신경망(304KB). dan 인포 위젯이 사용, 로프 배포(§24) | 보존 |
 
 ---
 
@@ -82,7 +82,7 @@ LazerSR.Hook.csproj      → ProjectReference → LazerSR.SunnyCalculator.csproj
 LazerSR.SunnyCalculator.csproj → ProjectReference(Private=false) → 위와 동일 osu 경로
 LazerSR.DanCalculator.csproj   → ProjectReference → LazerSR.SunnyCalculator.csproj
                               → ProjectReference(Private=false) → 위와 동일 osu 경로
-                              → PackageReference → Microsoft.ML.OnnxRuntime (Companella 전용, 현재 배포 strip)
+                              → PackageReference → Microsoft.ML.OnnxRuntime (Companella, 로프 배포)
 ```
 
 `osu\`가 없으면 `lazerSRClean` 전체가 빌드되지 않는다 — 절대 삭제 금지. `sunnyosu\`는 위 그래프 어디에도 안 걸린다(2026-08-19 확인) — 없어도 빌드된다, 삭제해도 무방하지만 과거 이식 근거로 보존 중.

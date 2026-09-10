@@ -13,7 +13,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- 로컬 폴백 빌드용 기본 버전. CI는 태그에서 /p:Version=... 로 덮어쓴다 (docs\end.md 참고). -->
-    <Version>6.14.0</Version>
+    <Version>6.14.1</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,6 +22,13 @@
   <ItemGroup>
     <None Include="..\LazerSR.Hook\MinaCalc.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- Companella dan model — stays loose next to the exe (Hook loads it by path).
+         Transitive project content does not carry CopyToPublishDirectory on its own. -->
+    <None Include="..\LazerSR.DanCalculator\Assets\dan_model.onnx">
+      <Link>dan_model.onnx</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>
   </ItemGroup>
 
@@ -34,18 +41,6 @@
   <Target Name="RemoveOsuAssembliesFromLauncherPublish" AfterTargets="ComputeFilesToPublish">
     <ItemGroup>
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="$([System.String]::Copy('%(ResolvedFileToPublish.Filename)').ToLowerInvariant().StartsWith('osu')) And ('%(ResolvedFileToPublish.Extension)' == '.dll' Or '%(ResolvedFileToPublish.Extension)' == '.xml' Or '%(ResolvedFileToPublish.Extension)' == '.pdb')" />
-    </ItemGroup>
-  </Target>
-
-  <!-- Companella (ONNX dan model) is ported but not yet wired into any live path
-       (step 5 — score collection). Keep its ~11 MB native runtime + model out of
-       the release until then. Re-enable by deleting this target and adding the
-       loose files to installer\LazerSRClean.iss. -->
-  <Target Name="DropUnusedOnnxFromPublish" AfterTargets="ComputeFilesToPublish">
-    <ItemGroup>
-      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
-          Condition="$([System.String]::Copy('%(ResolvedFileToPublish.Filename)').ToLowerInvariant().Contains('onnxruntime'))
-                   Or '%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)' == 'dan_model.onnx'" />
     </ItemGroup>
   </Target>
 
@@ -68,8 +63,15 @@
                    Or '%(ResolvedFileToPublish.Filename)' == 'Mono.Cecil.Mdb'
                    Or '%(ResolvedFileToPublish.Filename)' == 'Mono.Cecil.Pdb'
                    Or '%(ResolvedFileToPublish.Filename)' == 'Mono.Cecil.Rocks'
-                   Or '%(ResolvedFileToPublish.Filename)' == 'MinaCalc')
+                   Or '%(ResolvedFileToPublish.Filename)' == 'MinaCalc'
+                   Or '%(ResolvedFileToPublish.Filename)' == 'Microsoft.ML.OnnxRuntime'
+                   Or '%(ResolvedFileToPublish.Filename)' == 'onnxruntime'
+                   Or '%(ResolvedFileToPublish.Filename)' == 'onnxruntime_providers_shared')
                    And ('%(ResolvedFileToPublish.Extension)' == '.dll')" />
+      <!-- The dan model must be a real file on disk (Hook loads it by path), so keep
+           it out of the single-file bundle the same way. -->
+      <_HookFiles Include="@(ResolvedFileToPublish)"
+          Condition="'%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)' == 'dan_model.onnx'" />
       <ResolvedFileToPublish Remove="@(_HookFiles)" />
       <ResolvedFileToPublish Include="@(_HookFiles)" ExcludeFromSingleFile="true" />
     </ItemGroup>
