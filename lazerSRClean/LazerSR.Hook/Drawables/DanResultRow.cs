@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using LazerSR.DanCalculator;
 using LazerSR.DanCalculator.Classifier;
 using LazerSR.DanCalculator.Credit;
+using LazerSR.DanCalculator.Vibro;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
@@ -22,6 +23,7 @@ using osu.Game.Rulesets.Mania.Beatmaps;
 using osu.Game.Rulesets.Mods;
 using osu.Game.Rulesets.Scoring;
 using osu.Game.Scoring;
+using DanManiaBeatmap = LazerSR.DanCalculator.Beatmap.ManiaBeatmap;
 
 namespace LazerSR.Hook.Drawables;
 
@@ -153,8 +155,9 @@ public partial class DanResultRow : CompositeDrawable
 
                 var judgements = readJudgements(score);
                 var perf = PerformanceDan.Compute(classification, judgements);
+                bool rateVibro = CheckRateVibro(score, classification, osuText, rate, judgements);
 
-                schedule(token, () => apply(classification, perf));
+                schedule(token, () => apply(classification, perf, rateVibro, rate));
             }
             catch (Exception e)
             {
@@ -164,7 +167,7 @@ public partial class DanResultRow : CompositeDrawable
         });
     }
 
-    private void apply(ChartClassification c, PerformanceDanResult? perf)
+    private void apply(ChartClassification c, PerformanceDanResult? perf, bool rateVibro, double playRate)
     {
         var primary = c.Primary;
         if (primary == null || !c.Supported)
@@ -182,6 +185,18 @@ public partial class DanResultRow : CompositeDrawable
         fillSlot(mapSlot, DanImages.ResolveExisting(primary, c.KeyCount),
             primary.Label, primary.Variant ?? "", $"{side} · {primary.RawDan.ToString("0.00", ci)}");
 
+        // Rate-vibro reject (RateVibroChecker.Check .RateVibro == true — this SCORE's
+        // rate turned the chart into an unhuman shake, not the chart's own base
+        // vibro flag shown on mapSlot/DanInfoWidget's "⚠VIBRO"). Only the full-reject
+        // case is surfaced here; the partial-adjustment and clear-evidence cases
+        // already flow through perf (bar/accuracy) with no separate label.
+        if (rateVibro)
+        {
+            fillSlot(perfSlot, null, "VIBRO", "", $"{(int)Math.Round(playRate * 100)}%에서 비인정");
+            statusText.Text = $"{c.KeyCount}K {mods()} · 퍼포먼스 dan 미인정 (비브로)";
+            return;
+        }
+
         if (perf?.PerformanceDan is double pd)
         {
             string label = DanImages.ScaleLabel(pd, c.KeyCount, perf.Side);
@@ -198,6 +213,46 @@ public partial class DanResultRow : CompositeDrawable
                 ? $"bar 미달 (<{(perf.MinAccuracy * 100).ToString("0.0", ci)}%)"
                 : "");
             statusText.Text = $"{c.KeyCount}K {mods()} · bar 미달";
+        }
+    }
+
+    /// <summary>
+    /// RateVibroChecker.ShouldCheck/.Check (architecture.md §25) — only the full
+    /// reject (.RateVibro == true) is surfaced on this row; see the apply() call site
+    /// comment. DA's OD override is not threaded here (display-only secondary
+    /// indicator — DanPlayRecordBuilder's upload record is the authoritative one):
+    /// the only effect is the narrow clear-evidence exception reading the chart's
+    /// own OD instead of the DA-set one.
+    /// </summary>
+    private static bool CheckRateVibro(ScoreInfo score, ChartClassification classification, string osuText, double rate, DanJudgements judgements)
+    {
+        try
+        {
+            if (!RateVibroChecker.ShouldCheck(classification.KeyCount, rate,
+                    score.BeatmapInfo?.Status.GrantsPerformancePoints() ?? false)) return false;
+
+            DanManiaBeatmap ratedMap = LazerSR.DanCalculator.Beatmap.ManiaBeatmapParser.Parse(osuText);
+            var quality = new VibroClearInput
+            {
+                Statistics = new OsuScoreStatistics
+                {
+                    count_geki = judgements.Max,
+                    count_300 = judgements.Great,
+                    count_katu = judgements.Good,
+                    count_100 = judgements.Ok,
+                    count_50 = judgements.Meh,
+                    count_miss = judgements.Miss,
+                },
+                WidenedWindows = score.Mods.Any(m => m.Acronym == "EZ"),
+            };
+            var result = RateVibroChecker.Check(ratedMap, rate,
+                score.BeatmapInfo?.Status.GrantsPerformancePoints() ?? false, classification.Vibro, quality, null);
+            return result?.RateVibro == true;
+        }
+        catch (Exception e)
+        {
+            HookLog.Write($"[LazerSR] DanResultRow.CheckRateVibro failed: {e.Message}");
+            return false;
         }
     }
 

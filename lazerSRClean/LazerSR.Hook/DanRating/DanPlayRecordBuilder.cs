@@ -8,6 +8,7 @@ using LazerSR.DanCalculator.Beatmap;
 using LazerSR.DanCalculator.Classifier;
 using LazerSR.DanCalculator.Credit;
 using LazerSR.DanCalculator.PlayerRating;
+using LazerSR.DanCalculator.Vibro;
 using osu.Game.Beatmaps;
 using osu.Game.Beatmaps.Formats;
 using osu.Game.Online.API;
@@ -94,6 +95,31 @@ internal static class DanPlayRecordBuilder
             atRateLean = await DanClassifier.ClassifyChartLeanAsync(ratedText, atRateInput).ConfigureAwait(false);
         }
 
+        // Rate-vibro gate (player-skills.ts shouldCheckRateVibro / chartVibroAtRate,
+        // architecture.md §25). PP-backed = osu!'s own "this beatmap's PP is trusted"
+        // status (Ranked/Approved) — the closest local equivalent of mania-hub's
+        // ppBackedChartIds (a chart the player has an online-PP score on).
+        bool hasPpTrust = (working.BeatmapInfo as BeatmapInfo)?.Status.GrantsPerformancePoints() ?? false;
+        RateVibroResult? vibro = null;
+        if (RateVibroChecker.ShouldCheck(keyCount, rate, hasPpTrust))
+        {
+            var quality = new VibroClearInput
+            {
+                Statistics = new OsuScoreStatistics
+                {
+                    count_geki = judgements.Max,
+                    count_300 = judgements.Great,
+                    count_katu = judgements.Good,
+                    count_100 = judgements.Ok,
+                    count_50 = judgements.Meh,
+                    count_miss = judgements.Miss,
+                },
+                WidenedWindows = mods.Any(m => m.Acronym == "EZ"),
+            };
+            double? odOverride = PlayEligibility.DifficultyAdjustOd(mods);
+            vibro = RateVibroChecker.Check(parsed, rate, hasPpTrust, baseLean.Vibro, quality, odOverride);
+        }
+
         var buildInput = new PlayUploadBuildInput
         {
             OsuText = osuText,
@@ -127,6 +153,7 @@ internal static class DanPlayRecordBuilder
             BaseLean = baseLean,
             AtRateLean = atRateLean,
             TopologyKey = ChartFamily.ChartTopologyKey(parsed),
+            Vibro = vibro,
             IncludeLean = true,
         };
 

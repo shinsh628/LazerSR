@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using HarmonyLib;
 using LazerSR.Hook.DanRating;
 using LazerSR.Hook.Ipc;
+using LazerSR.Hook.ReplayUpload;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics.Containers;
 using osu.Game.Beatmaps;
@@ -15,8 +16,20 @@ namespace LazerSR.Hook.Patches;
 /// <summary>
 /// <see cref="Player.ImportScore"/> Postfix — same target/logic as
 /// <see cref="PersonalSunnyScoreCollectorPatch"/> / <see cref="ReplayAutoUploadPatch"/>:
-/// every real solo/multi completion, with training/section-practice/replay Players
-/// auto-excluded (they override ImportScore without <c>base</c>).
+/// training/section-practice/replay Players are auto-excluded (they override
+/// ImportScore without <c>base</c>).
+/// <para>
+/// <b>Ownership check (2026-09-14 fix)</b>: <c>SpectatorPlayer</c> does NOT override
+/// <c>ImportScore</c> (verified against osu source — unlike <c>ReplayPlayer</c>/training/
+/// section-practice/pattern-copy), so spectating another lazerSR user's live match calls
+/// this Postfix with THEIR <see cref="ScoreInfo"/> (<c>RealmUser</c> = the spectated
+/// player, not the local one). Without a check this uploads a dan record under their
+/// name from our local calculation of what we watched — 6 foreign usernames showed up in
+/// the server's <c>dan_plays</c> this way (progress log 2026-09-14). Same ownership check
+/// as <see cref="ReplayCollectService"/>'s trigger #1 (<c>ScoreInfo.RealmUser.OnlineID ==
+/// 로그인 유저 id</c>) — no .osr-header cross-check here since that guards a bulk realm
+/// scan of arbitrary historical rows, not a single fresh ImportScore event.
+/// </para>
 /// <para>
 /// Builds the per-play dan record (<see cref="DanPlayRecordBuilder"/>), writes it to
 /// the dan-play queue, and pings the launcher to drain it. Read-only — reads the
@@ -40,6 +53,13 @@ public static class DanPlayCollectorPatch
 
             var scoreInfo = score?.ScoreInfo;
             if (scoreInfo == null || scoreInfo.Ruleset.OnlineID != 3) return;
+
+            int localUserId = HookRuntimeContext.Api?.LocalUser.Value.Id ?? 0;
+            if (localUserId <= 1 || scoreInfo.RealmUser.OnlineID != localUserId)
+            {
+                HookLog.Write($"[LazerSR] DanPlayCollectorPatch: skipping non-local score (owner={scoreInfo.RealmUser.OnlineID}, local={localUserId}).");
+                return;
+            }
 
             resolveDeps(owner);
             var beatmapManager = _beatmapManager;
