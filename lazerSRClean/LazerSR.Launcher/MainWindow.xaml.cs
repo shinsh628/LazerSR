@@ -195,6 +195,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 프로필 위젯: dan 등급/SSR 랭킹 조회도 같은 이유로 런처가 대신 친다.
+        if (line.StartsWith("psreq:"))
+        {
+            var p = line.Split(':', 3);
+            if (p.Length >= 3)
+                _ = HandlePlayerSkillsRequestAsync(p[1], p[2]);
+            return;
+        }
+
         if (!line.StartsWith("replaycollect:")) return;
 
         string payload = line["replaycollect:".Length..];
@@ -321,6 +330,19 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             await SendPipeAsync($"lbdlerr:{reqId}:{ex.Message}");
+        }
+    }
+
+    private async Task HandlePlayerSkillsRequestAsync(string reqId, string osuUsername)
+    {
+        try
+        {
+            string json = await DanPlayServerClient.GetPlayerSkillsRawAsync(osuUsername);
+            await SendPipeAsync($"psreqok:{reqId}:{json}");
+        }
+        catch (Exception ex)
+        {
+            await SendPipeAsync($"psreqerr:{reqId}:{ex.Message}");
         }
     }
 

@@ -30,6 +30,13 @@ public static class DanPlayServerClient
 
     public readonly record struct SyncResult(int Uploaded, int Failed, string? FirstError);
 
+    /// <summary>
+    /// player-skills 원본 JSON(dan 등급 + SSR 랭킹). Hook이 파이프로 요청하면 런처가 대신
+    /// 친다(Hook은 네트워크 금지) — lazerSR 리더보드와 같은 패턴(§23/§25).
+    /// </summary>
+    public static async Task<string> GetPlayerSkillsRawAsync(string osuUsername)
+        => await http.GetStringAsync($"{BaseUrl}/api/v1/player-skills/{Uri.EscapeDataString(osuUsername)}");
+
     public static async Task<SyncResult> DrainQueueAsync(Action<string>? report = null)
     {
         string[] files = Directory.Exists(QueueDir) ? Directory.GetFiles(QueueDir, "*.json") : Array.Empty<string>();
