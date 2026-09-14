@@ -4,9 +4,11 @@ using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using LazerSR.Hook.Data;
 using LazerSR.Hook.Drawables;
 using LazerSR.Hook.Ipc;
 using osu.Framework.Allocation;
+using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Rendering;
@@ -27,10 +29,11 @@ namespace LazerSR.Hook.Widgets;
 /// 한 줄로 보여준다. 왼쪽부터 전체(RC 헤드라인, 굵은 구분선) | 잭 | 테크 | 스피드 | 스태미나
 /// (얇은 구분선 x4) | LN(헤드라인). 6K/7K는 아직 안 다룬다.
 /// <para>
-/// 서버가 업로드 시점에 이미 계산해둔 캐시(dan_verdicts)를 그대로 읽기만 하므로, 위젯은
-/// <see cref="LoadComplete"/> 시 한 번만 조회하고 그 뒤로는 갱신하지 않는다 — 결과창엔 스킨
-/// 위젯 레이어 자체가 없어 이 위젯이 그려지지 않고, 결과창에서 선곡 화면으로 돌아오면 위젯이
-/// 새로 로드되며 그때 다시 조회된다(자연스러운 갱신 타이밍).
+/// 서버가 업로드 시점에 이미 계산해둔 캐시(dan_verdicts)를 그대로 읽기만 한다. 처음엔 결과창→
+/// 선곡화면 복귀 시 위젯이 스스로 새로 로드될 거라 가정했으나 실기에서 틀렸음이 확인됨(선곡
+/// 화면이 서스펜드→재개될 뿐 LoadComplete가 다시 안 불림) — 대신 <see cref="SongSelectEntryState"/>
+/// (SongSelect.OnEntering/OnResuming 후킹, §26)를 구독해 선곡 화면이 현재 화면이 될 때마다
+/// 폴링 없이 재조회한다.
 /// </para>
 /// Hook은 네트워크 금지라 파이프로 런처에 조회를 대신 시킨다(§23 lazerSR 리더보드와 동일 패턴,
 /// <c>psreq</c>/<c>psreqok</c>/<c>psreqerr</c>). 읽기 전용 — 서버에 아무것도 쓰지 않는다.
@@ -57,6 +60,9 @@ public class DanProfileWidget : CompositeDrawable, ISerialisableDrawable
     private Container staminaCell = null!;
     private Container lnCell = null!;
     private CancellationTokenSource? cts;
+
+    // 필드로 보관 — 지역변수로 BindTo하면 GC가 도는 순간 조용히 끊기는 함정이 있음(ui-patching.md).
+    private readonly Bindable<int> songSelectEntered = new();
 
     public DanProfileWidget()
     {
@@ -136,9 +142,19 @@ public class DanProfileWidget : CompositeDrawable, ISerialisableDrawable
         // 게임플레이 중엔 그리지 않는다 — 선곡 화면 전용(결과창엔 스킨 위젯 레이어 자체가 없음).
         if (gameplayState != null) return;
 
+        refresh(); // 최초 로드
+
+        // 이후 갱신은 폴링이 아니라 SongSelect.OnEntering/OnResuming 신호를 구독해서만 일어난다.
+        songSelectEntered.BindTo(SongSelectEntryState.EnteredToken);
+        songSelectEntered.BindValueChanged(_ => refresh());
+    }
+
+    private void refresh()
+    {
         string? username = api?.LocalUser.Value.Username;
         if (string.IsNullOrEmpty(username) || username == "Guest") return;
 
+        cts?.Cancel();
         cts = new CancellationTokenSource();
         var token = cts.Token;
 
