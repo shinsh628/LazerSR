@@ -74,6 +74,33 @@ public sealed class ChartClassification
     /// this stays null). Display-only ranking signal; not a real per-axis dan.
     /// </summary>
     public List<RoxyAxisContribution>? RoxyAxes;
+    /// <summary>
+    /// LeoBlack pattern-window types (Stream/Chordstream/Jacks core, RC scope
+    /// only — Coordination/Density/Wildcard excluded) joined against Roxy's
+    /// 400ms section-difficulty curve: each pattern's share of the chart's time
+    /// span, plus its typical section value relative to the chart's own peak
+    /// section (0..1). Non-null ONLY under the same Roxy-won-routing condition
+    /// as <see cref="RoxyAxes"/>. This — not RoxyAxes — is the "which named
+    /// pattern, and how much does it matter" signal (2026-09-15).
+    /// </summary>
+    public List<RoxyPatternDifficulty>? RoxyPatterns;
+}
+
+/// <summary>One LeoBlack pattern type's time-share + relative difficulty within
+/// one chart. <see cref="Pattern"/> is the core category (Stream/Chordstream/
+/// Jacks); <see cref="SpecificType"/> is the display name (e.g. "Trills",
+/// "Chordjacks") — falls back to Pattern when no specific type won.</summary>
+public sealed class RoxyPatternDifficulty
+{
+    public string Pattern = "";
+    public string SpecificType = "";
+    /// <summary>0..1+ share of the chart's time span this pattern covers
+    /// (union of its windows' intervals, not a raw duration sum).</summary>
+    public double TimeShare;
+    /// <summary>0..1: this pattern's typical Roxy section value divided by the
+    /// chart's own peak section value — "how close to this chart's hardest
+    /// moment" rather than any cross-chart dan-scale comparison.</summary>
+    public double RelativeIntensity;
 }
 
 /// <summary>One axis of Roxy's structural breakdown. <see cref="Axis"/> is the

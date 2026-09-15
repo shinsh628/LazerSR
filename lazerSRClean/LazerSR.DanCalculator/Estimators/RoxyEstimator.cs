@@ -830,12 +830,15 @@ public static class RoxyEstimator
         };
     }
 
-    private static double ComputeSectionAggregate(List<RoxyRow> rows, IReadOnlyList<double> localRaw)
+    // Shared by ComputeSectionAggregate (unchanged scalar collapse) and
+    // BuildSectionCurve (new, exports the per-section values before they're
+    // collapsed). Pure extraction — no behavior change to the existing scalar.
+    private static Dictionary<int, double> BuildSectionMax(List<RoxyRow> rows, IReadOnlyList<double> localRaw)
     {
-        if (rows.Count == 0 || localRaw.Count == 0) return 0;
+        var sectionMax = new Dictionary<int, double>();
+        if (rows.Count == 0 || localRaw.Count == 0) return sectionMax;
 
         double firstTime = rows[0].T;
-        var sectionMax = new Dictionary<int, double>();
         double smoothedRaw = double.IsFinite(localRaw[0]) ? localRaw[0] : 0;
         for (int i = 0; i < rows.Count; i += 1)
         {
@@ -845,7 +848,12 @@ public static class RoxyEstimator
             double prev = sectionMax.TryGetValue(section, out var pv) ? pv : 0;
             sectionMax[section] = Math.Max(prev, smoothedRaw);
         }
+        return sectionMax;
+    }
 
+    private static double ComputeSectionAggregate(List<RoxyRow> rows, IReadOnlyList<double> localRaw)
+    {
+        var sectionMax = BuildSectionMax(rows, localRaw);
         var values = sectionMax.Values.Where(v => double.IsFinite(v) && v > 0).ToList();
         values.Sort((a, b) => b.CompareTo(a));
         if (values.Count == 0) return 0;
@@ -861,6 +869,32 @@ public static class RoxyEstimator
         }
 
         return SafeDiv(total, weightTotal, 0);
+    }
+
+    // Exports the 400ms section-peak curve BuildSectionMax computes on the way
+    // to the single collapsed sectionAgg scalar — the "difficulty over time"
+    // signal used to line up against the LeoBlack pattern-window timestamps
+    // (LazerSR.DanCalculator.Patterns.FoundPattern). atMs is on Roxy's
+    // canonicalized time axis (first analyzed row = ~canonicalFirstObjectMs);
+    // callers reverse the canonicalization using the speedRateMode debug block
+    // (originalFirstObjectMs / analysisSpeedRate / canonicalFirstObjectMs) to
+    // line up with the original .osu timestamps the pattern pipeline uses.
+    private static List<Dictionary<string, object?>> BuildSectionCurve(List<RoxyRow> rows, IReadOnlyList<double> localRaw)
+    {
+        var sectionMax = BuildSectionMax(rows, localRaw);
+        var curve = new List<Dictionary<string, object?>>();
+        if (rows.Count == 0) return curve;
+
+        double firstTime = rows[0].T;
+        foreach (var section in sectionMax.Keys.OrderBy(s => s))
+        {
+            curve.Add(new Dictionary<string, object?>
+            {
+                ["atMs"] = Fmt4(firstTime + section * CfgSectionMs),
+                ["value"] = Fmt4(sectionMax[section]),
+            });
+        }
+        return curve;
     }
 
     private sealed class RoxyStats
@@ -2019,6 +2053,7 @@ public static class RoxyEstimator
             var activity = ComputeActivityStats(rows, taps.Count);
             var curve = ComputeRoxyCurve(rows, taps, activity);
             var axisBreakdown = BuildAxisBreakdown(curve);
+            var sectionCurve = BuildSectionCurve(rows, curve.LocalRaw);
             var numericDetails = ComputeRoxyNumeric(curve);
             double structuralNumeric = Math.Round(numericDetails.Numeric, 2, MidpointRounding.AwayFromZero);
 
@@ -2206,6 +2241,7 @@ public static class RoxyEstimator
                     ["corrections"] = numericDetails.Corrections.ToDebugDict(),
                     ["streams"] = streamsDebug,
                     ["axisBreakdown"] = axisBreakdown,
+                    ["sectionCurve"] = sectionCurve,
                 },
             };
         }

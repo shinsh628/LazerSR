@@ -359,6 +359,14 @@ public static class ChartClassifier
             }
         }
 
+        List<RoxyPatternDifficulty>? roxyPatterns = null;
+        if (mixed?.NumericDifficultyHint == "roxy-meta-ridge-v3"
+            && mixed.Debug.TryGetValue("sectionCurve", out var sectionCurveRaw) && sectionCurveRaw is List<Dictionary<string, object?>> sectionCurveList
+            && mixed.Debug.TryGetValue("speedRateMode", out var speedRateModeRaw) && speedRateModeRaw is Dictionary<string, object?> speedRateMode)
+        {
+            roxyPatterns = BuildRoxyPatternDifficulty(osuText, sectionCurveList, speedRateMode);
+        }
+
         string? verdictText = mixed != null ? (mixed.EstDiff ?? "").Trim() : null;
         bool verdictUsable = verdictText != null && verdictText.Length > 0
             && !InvalidRe.IsMatch(verdictText) && !UnknownRe.IsMatch(verdictText);
@@ -514,7 +522,115 @@ public static class ChartClassifier
             CompanellaPending = mixed?.MixedCompanellaPlan != null,
             Warnings = warnings,
             RoxyAxes = roxyAxes,
+            RoxyPatterns = roxyPatterns,
         };
+    }
+
+    // Joins LeoBlack's raw pattern-window matches (FindPatterns.Find, pre-
+    // clustering — one entry per matched scan position, with real timestamps)
+    // against Roxy's 400ms section-difficulty curve (RoxyEstimator's
+    // Debug["sectionCurve"], exported from the same internal step
+    // ComputeSectionAggregate collapses into the single rawAgg contribution).
+    // The two pipelines parse the SAME .osu text independently and Roxy
+    // canonicalizes its own time axis before analysis (CanonicalizeOsuTiming),
+    // so section timestamps are reversed back to the original file's time axis
+    // using the speedRateMode debug block before comparing against pattern
+    // window Start/End (which FindPatterns reads unscaled from osuText).
+    private static List<RoxyPatternDifficulty> BuildRoxyPatternDifficulty(
+        string osuText, List<Dictionary<string, object?>> sectionCurveDebug, Dictionary<string, object?> speedRateMode)
+    {
+        static double AsDouble(object? o) => o is double d ? d : 0;
+
+        double originalFirst = AsDouble(speedRateMode.GetValueOrDefault("originalFirstObjectMs"));
+        double analysisRate = speedRateMode.TryGetValue("analysisSpeedRate", out var arv) && arv is double ard && ard > 0 ? ard : 1.0;
+        double canonicalFirst = AsDouble(speedRateMode.GetValueOrDefault("canonicalFirstObjectMs"));
+        if (canonicalFirst <= 0) canonicalFirst = 1000;
+        const double sectionMs = 400.0;
+
+        var curve = sectionCurveDebug
+            .Select(e => (
+                AtMs: (AsDouble(e.GetValueOrDefault("atMs")) - canonicalFirst) * analysisRate + originalFirst,
+                Value: AsDouble(e.GetValueOrDefault("value"))))
+            .OrderBy(c => c.AtMs)
+            .ToList();
+        if (curve.Count == 0) return new List<RoxyPatternDifficulty>();
+        double peak = curve.Max(c => c.Value);
+        if (peak <= 0) return new List<RoxyPatternDifficulty>();
+
+        List<FoundPattern> windows;
+        try { windows = PatternService.FindPatternWindows(osuText); }
+        catch { return new List<RoxyPatternDifficulty>(); }
+
+        // RC scope only — LN-driven core patterns (Coordination/Density/Wildcard)
+        // have no place on a Roxy (4K RC, LN ratio <= 0.18) chart's pattern summary.
+        var rcCores = new HashSet<string> { CorePattern.Stream, CorePattern.Chordstream, CorePattern.Jacks };
+        var rcWindows = windows.Where(w => rcCores.Contains(w.Pattern)).ToList();
+        if (rcWindows.Count == 0) return new List<RoxyPatternDifficulty>();
+
+        double chartSpan = Math.Max(1, rcWindows.Max(w => w.End) - rcWindows.Min(w => w.Start));
+
+        (double Avg, int Count) OverlapAvg(double startMs, double endMs)
+        {
+            double sum = 0;
+            int count = 0;
+            foreach (var section in curve)
+            {
+                if (section.AtMs < endMs && section.AtMs + sectionMs > startMs)
+                {
+                    sum += section.Value;
+                    count += 1;
+                }
+            }
+            return count > 0 ? (sum / count, count) : (0, 0);
+        }
+
+        var result = new List<RoxyPatternDifficulty>();
+        foreach (var group in rcWindows.GroupBy(w => (w.Pattern, Specific: w.SpecificType ?? w.Pattern)))
+        {
+            // FindPatterns' scan windows routinely overlap (multi-label same-window
+            // matching is intentional), so time coverage needs an interval union —
+            // summing window durations directly can exceed the chart's own span.
+            var intervals = group.Select(w => (w.Start, w.End)).OrderBy(i => i.Start).ToList();
+            double unionMs = 0;
+            double curStart = intervals[0].Start, curEnd = intervals[0].End;
+            foreach (var (start, end) in intervals)
+            {
+                if (start > curEnd)
+                {
+                    unionMs += curEnd - curStart;
+                    curStart = start;
+                    curEnd = end;
+                }
+                else
+                {
+                    curEnd = Math.Max(curEnd, end);
+                }
+            }
+            unionMs += curEnd - curStart;
+
+            // Windows before Roxy's own analyzed row range (a short lead-in Roxy's
+            // row-builder treats differently than the pattern parser) have no
+            // overlapping section — excluded rather than counted as a false zero.
+            double weightedSum = 0, weightedDuration = 0;
+            foreach (var window in group)
+            {
+                var (avg, count) = OverlapAvg(window.Start, window.End);
+                if (count == 0) continue;
+                double duration = Math.Max(1, window.End - window.Start);
+                weightedSum += avg * duration;
+                weightedDuration += duration;
+            }
+            if (weightedDuration <= 0) continue;
+
+            result.Add(new RoxyPatternDifficulty
+            {
+                Pattern = group.Key.Pattern,
+                SpecificType = group.Key.Specific,
+                TimeShare = unionMs / chartSpan,
+                RelativeIntensity = Math.Clamp((weightedSum / weightedDuration) / peak, 0, 1),
+            });
+        }
+        return result.OrderByDescending(r => r.TimeShare).ToList();
     }
 
     public static SkillScores BuildSkillScores(DanVerdictHalf primary)

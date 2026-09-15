@@ -34,27 +34,17 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
 {
     public bool UsesFixedAnchor { get; set; }
 
-    // Roxy's internal axis names -> the display names the user chose. Only
-    // shown for 4K RC charts where Roxy itself won the routing (see
-    // ChartClassification.RoxyAxes); everything else keeps the plain dan text.
-    private static readonly Dictionary<string, string> roxyAxisDisplayNames = new()
-    {
-        ["speed"] = "스피드",
-        ["handStream"] = "핸스",
-        ["jack"] = "미니잭",
-        ["chordjack"] = "코드잭",
-        ["tech"] = "테크",
-        ["stamina"] = "밀도",
-        ["course"] = "체력",
-    };
-
-    [SettingSource("Roxy 패턴축 최소 raw 기준")]
-    public BindableNumber<float> RoxyAxisRawFloor { get; } =
-        new BindableFloat(2) { MinValue = -2, MaxValue = 15, Precision = 0.5f };
-
-    [SettingSource("Roxy 패턴축 최소 비중 (%)")]
-    public BindableNumber<float> RoxyAxisShareFloorPercent { get; } =
+    // Only shown for 4K RC charts where Roxy itself won the routing (see
+    // ChartClassification.RoxyPatterns); everything else keeps the plain dan
+    // text. Names are LeoBlack's own pattern names (Trills, Chordjacks, ...),
+    // shown verbatim — no display renaming.
+    [SettingSource("패턴 최소 비중 (%)")]
+    public BindableNumber<float> PatternShareFloorPercent { get; } =
         new BindableFloat(5) { MinValue = 0, MaxValue = 50, Precision = 1 };
+
+    [SettingSource("패턴 최소 상대강도 (%)")]
+    public BindableNumber<float> PatternIntensityFloorPercent { get; } =
+        new BindableFloat(50) { MinValue = 0, MaxValue = 100, Precision = 1 };
 
     [Resolved(canBeNull: true)]
     private GameplayState? gameplayState { get; set; }
@@ -117,8 +107,8 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
 
         // Slider tweaks re-render the already-classified map instantly instead
         // of waiting for the next map/mod change to re-run the heavy classify.
-        RoxyAxisRawFloor.BindValueChanged(_ => renderCurrent());
-        RoxyAxisShareFloorPercent.BindValueChanged(_ => renderCurrent());
+        PatternShareFloorPercent.BindValueChanged(_ => renderCurrent());
+        PatternIntensityFloorPercent.BindValueChanged(_ => renderCurrent());
 
         if (gameplayState != null)
         {
@@ -257,13 +247,14 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
         string sideTag = primary.Kind == "ln" ? "LN" : "RC";
         string main = $"{sideTag}  {half(primary)}{(c.Vibro ? "  ⚠VIBRO" : "")}";
 
-        // Second line: Roxy's top pattern axes when this chart's verdict actually
-        // came from Roxy (4K RC only — see RoxyAxes). Falls back to the RC/LN
-        // hybrid detail when Roxy didn't run or nothing clears the floors.
-        string? axisSummary = c.Vibro ? null : buildAxisSummary(c.RoxyAxes);
+        // Second line: top named patterns (LeoBlack pattern types joined against
+        // Roxy's difficulty curve) when this chart's verdict actually came from
+        // Roxy (4K RC only — see RoxyPatterns). Falls back to the RC/LN hybrid
+        // detail when Roxy didn't run or nothing clears the floors.
+        string? patternSummary = c.Vibro ? null : buildPatternSummary(c.RoxyPatterns);
         string detail;
-        if (axisSummary != null)
-            detail = axisSummary;
+        if (patternSummary != null)
+            detail = patternSummary;
         else if (c.Rc != null && c.Ln != null && half(c.Rc) != half(c.Ln))
             detail = $"RC {half(c.Rc)}  ·  LN {half(c.Ln)}";
         else
@@ -272,21 +263,21 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
         return (main, detail);
     }
 
-    // Top 3 of Roxy's 7 axes by share of the structural signal, excluding any
-    // axis whose local raw-dan-equivalent or share doesn't clear the sliders'
-    // floors. Both floors are user-tunable in the skin editor.
-    private string? buildAxisSummary(List<RoxyAxisContribution>? axes)
+    // Top 3 patterns by time share, excluding any pattern whose time share or
+    // relative intensity (vs. this chart's own hardest moment) doesn't clear
+    // the sliders' floors. Names are shown verbatim (LeoBlack's own naming).
+    private string? buildPatternSummary(List<RoxyPatternDifficulty>? patterns)
     {
-        if (axes == null || axes.Count == 0) return null;
+        if (patterns == null || patterns.Count == 0) return null;
 
-        double rawFloor = RoxyAxisRawFloor.Value;
-        double shareFloor = RoxyAxisShareFloorPercent.Value / 100.0;
+        double shareFloor = PatternShareFloorPercent.Value / 100.0;
+        double intensityFloor = PatternIntensityFloorPercent.Value / 100.0;
 
-        var picked = axes
-            .Where(a => a.LocalRawDan >= rawFloor && a.Share > shareFloor)
-            .OrderByDescending(a => a.Share)
+        var picked = patterns
+            .Where(p => p.TimeShare > shareFloor && p.RelativeIntensity >= intensityFloor)
+            .OrderByDescending(p => p.TimeShare)
             .Take(3)
-            .Select(a => roxyAxisDisplayNames.TryGetValue(a.Axis, out var name) ? name : a.Axis)
+            .Select(p => p.SpecificType)
             .ToList();
 
         return picked.Count > 0 ? string.Join("  ·  ", picked) : null;

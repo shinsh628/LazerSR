@@ -1101,29 +1101,41 @@ within-1-tier 100%. <4★에서 발산(원인: `chart-classifier`의 `sunnyLowEn
   하이브리드면 둘째 줄에 RC·LN 두 half — 단, 아래 Roxy 축 요약이 있으면 그게 둘째 줄을 대신한다.
 - `mania`가 아니면 `N/A`.
 
-**Roxy 패턴축 요약(2026-09-15 신규)** — 둘째 줄, vibro 아닌 4K RC이고 **Roxy가 실제로 라우팅을 이긴
-경우에만**(`mixed.NumericDifficultyHint == "roxy-meta-ridge-v3"` — Mixed 라우팅상 Roxy는 고난이도만
-맡고 저난이도 4K RC는 Azusa가 대신 계산하므로 전체 4K RC 중 일부에서만 뜸) Roxy의 7축
-(speed/handStream/jack/chordjack/tech/stamina/course, `RoxyEstimator.BuildAxisBreakdown`) 중 비중
-상위 3개를 표시. 축 이름은 위젯에서 스피드/핸스/미니잭/코드잭/테크/밀도/체력으로 리네임.
+**Roxy 패턴 요약(2026-09-15, v7.2.0으로 7축 방식을 대체)** — 둘째 줄, vibro 아닌 4K RC이고 **Roxy가
+실제로 라우팅을 이긴 경우에만**(`mixed.NumericDifficultyHint == "roxy-meta-ridge-v3"` — Mixed 라우팅상
+Roxy는 고난이도만 맡고 저난이도 4K RC는 Azusa가 대신 계산하므로 전체 4K RC 중 일부에서만 뜸) 패턴 이름
+상위 3개를 표시(LeoBlack 원문 그대로, 리네임 없음 — 예: Trills, Chordjacks, Jumpstream).
 
-- **가교 없음**: 이 7축은 `LazerSR.DanCalculator\Patterns\`(잭/스트림 등 ~20종 클러스터링, §패턴 분류)와
-  코드상 아무 연결이 없는 완전 별개 시스템이다 — 같은 이름(jack 등)이 겹칠 뿐, mania-hub 원본에도 둘을
-  잇는 매핑은 존재하지 않는다. 7축은 Roxy가 최종 dan 숫자를 만들 때 실제로 쓰는 구조적 신호 그 자체를
-  그대로 노출한 것.
-- **산출 방식**: `RoxyCurve.StreamSummaries[axis].Aggregate × StreamWeights[axis]`가 최종 raw 구조
-  신호(`rawAgg`)의 80%를 차지하는 항. `LocalRawDan`은 그 축의 기여값 하나만 떼어 `ComputeRoxyNumeric`과
-  같은 log 압축 + 선형매핑 + isotonic 변환(보정/메타모델은 생략)을 통과시킨 근사치 — 화면 표시는 안 하고
-  최소컷 판정에만 쓴다.
-- **`Share` 정규화(2026-09-15 수정)**: 7축의 raw 누적 스케일은 서로 비교 불가능하다 — stamina/course는
-  burst/stamina 감쇠 시간상수가 나머지 5축보다 10~170배 길어서(`StreamBurstTau`/`StreamStaminaTau`),
-  raw 기여값을 그대로 정규화하면 실제 맵 내용과 무관하게 항상 stamina/course만 이긴다(418개 맵 실측:
-  naive 평균 비중 stamina 0.51/course 0.46, 나머지 5축 합쳐서 0.04 미만, 418개 전부 1등이 그 둘 중
-  하나). 순수 tau 비율 보정을 먼저 시도했으나 더 나빠짐(stamina 418/418 독점) — `staminaIn` 공식 안에
-  또 다른 8초 감쇠 누적기(`maxHandStamina`)가 중첩돼 있어 바깥쪽 tau 비율만으론 설명이 안 됨. 대신
-  418개 4K RC 실측 맵(무작위 9000개 스캔)에서 축별 raw 기여값의 **중앙값**을 코드 상수
-  (`AxisShareReference`)로 박아 각 축을 자기 자신의 전형적 스케일로 나눈 뒤 비중을 계산 —
-  평균 비중이 0.07~0.20 사이로 고르게 퍼지고 맵마다 1등 축이 달라짐을 확인.
+- **7축 방식 폐기 이유**: v7.1.0~v7.1.1에서 Roxy의 7축(speed/handStream/jack/chordjack/tech/stamina/
+  course) 자체를 서로 비교해 표시했었다. 리서치 결과 mania-hub도, Roxy 원저작자(LeoBlackMT) 본인도 이
+  7축을 사용자에게 노출한 적이 없고, 원저작자의 유일한 시도(`RoxyHandSplitTech`)조차 "과적합이라 폐기"
+  꼬리표를 달고 디버그 아카이브에 묻혀 있었다(`docs/roxy_algorithm.md`, 로컬 `LeoBlackMT-osumania_map_
+  analyser` 클론 확인). 축 이름도 Rolls/Trills/Jumpstream 같은 실제 패턴 어휘와 무관한 내부 계산 채널
+  이름이라 사용자에게 의미 있는 표시가 아니었음.
+- **새 산출 방식 — 두 개의 독립 파이프라인을 시간으로 이어붙임**:
+  1. **패턴 위치**: `LazerSR.DanCalculator\Patterns\FindPatterns.cs`가 만드는 원시 매치 리스트
+     (`FoundPattern` — Pattern/SpecificType/Start/End, 클러스터링으로 뭉개지기 전 단계)를
+     `PatternService.FindPatternWindows(osuText)`로 그대로 노출. RC 스코프이므로 Stream/Chordstream/
+     Jacks 코어만 사용(Coordination/Density/Wildcard는 LN 전용이라 제외).
+  2. **구간별 난이도**: `RoxyEstimator.ComputeSectionAggregate`가 내부적으로 이미 만드는 400ms 구간별
+     최댓값(`sectionMax`, 최종 스칼라로 접기 직전 단계)을 `BuildSectionCurve`로 추출해
+     `Debug["sectionCurve"]`에 실음. 계산 로직 자체는 미변경(순수 추출).
+  3. **시간축 합치기**: 패턴 쪽은 원본 `.osu` 시각을 그대로 쓰지만, Roxy는 분석 전에
+     `CanonicalizeOsuTiming`으로 시간축을 재배치(첫 노트를 1000ms로 이동 + 배속 스케일)한다. 이미
+     `Debug["speedRateMode"]`에 있는 `originalFirstObjectMs`/`analysisSpeedRate`/
+     `canonicalFirstObjectMs`로 역변환해서 원본 시각으로 되돌린 뒤 겹쳐본다
+     (`ChartClassifier.BuildRoxyPatternDifficulty`).
+  4. **집계**: 패턴 타입별로 겹치는 시간구간을 합집합해 `TimeShare`(맵 전체 대비 시간비율)를 구하고,
+     그 구간에 겹치는 400ms 구간값들의 (구간 길이 가중) 평균을 그 맵 자체의 피크 구간값으로 나눠
+     `RelativeIntensity`(0~1, "이 맵의 가장 어려운 순간 대비 몇 %인가")를 구한다 — **다른 맵과 비교하는
+     값이 아니라 같은 맵 안에서만 비교**하므로 7축 방식이 겪었던 스케일 불일치 문제가 구조적으로 없다.
+     Roxy 자체 분석 범위 이전(짧은 인트로 등)이라 겹치는 구간이 없는 윈도우는 0으로 세지 않고 평균에서
+     제외.
+- **최소컷(위젯 세부설정 슬라이더)**: `PatternShareFloorPercent`(기본 5%)와
+  `PatternIntensityFloorPercent`(기본 50%) 둘 다 통과한 패턴만 후보, 시간비율 내림차순 상위 3개.
+- 실측 검증(`dev\OsuScoreModel` 무작위 4K 샘플, Roxy 적중 맵 10개 육안 확인): 맵마다 서로 다른 패턴
+  조합이 자연스럽게 뜸 — 예: "Chordstream · Handstream · Jumpstream", "Longjacks · Chordjacks",
+  "Stream · Minitrills · Rolls" 등. 7축 방식과 달리 특정 항목이 항상 독점하는 현상 없음.
 - **최소컷(위젯 세부설정 슬라이더로 조정 가능)**: `RoxyAxisRawFloor`(기본 2, LocalRawDan 미만이면 제외)
   와 `RoxyAxisShareFloorPercent`(기본 5%, Share 이하면 제외) 둘 다 통과한 축만 후보. 통과한 것 중 비중
   상위 3개.
