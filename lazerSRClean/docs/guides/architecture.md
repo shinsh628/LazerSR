@@ -1112,9 +1112,18 @@ within-1-tier 100%. <4★에서 발산(원인: `chart-classifier`의 `sunnyLowEn
   잇는 매핑은 존재하지 않는다. 7축은 Roxy가 최종 dan 숫자를 만들 때 실제로 쓰는 구조적 신호 그 자체를
   그대로 노출한 것.
 - **산출 방식**: `RoxyCurve.StreamSummaries[axis].Aggregate × StreamWeights[axis]`가 최종 raw 구조
-  신호(`rawAgg`)의 80%를 차지하는 항이므로, 이 축별 기여값을 정규화하면 그 축의 실제 비중(`Share`)이 된다.
-  `LocalRawDan`은 그 축의 기여값 하나만 떼어 `ComputeRoxyNumeric`과 같은 log 압축 + 선형매핑 +
-  isotonic 변환(보정/메타모델은 생략)을 통과시킨 근사치 — 화면 표시는 안 하고 최소컷 판정에만 쓴다.
+  신호(`rawAgg`)의 80%를 차지하는 항. `LocalRawDan`은 그 축의 기여값 하나만 떼어 `ComputeRoxyNumeric`과
+  같은 log 압축 + 선형매핑 + isotonic 변환(보정/메타모델은 생략)을 통과시킨 근사치 — 화면 표시는 안 하고
+  최소컷 판정에만 쓴다.
+- **`Share` 정규화(2026-09-15 수정)**: 7축의 raw 누적 스케일은 서로 비교 불가능하다 — stamina/course는
+  burst/stamina 감쇠 시간상수가 나머지 5축보다 10~170배 길어서(`StreamBurstTau`/`StreamStaminaTau`),
+  raw 기여값을 그대로 정규화하면 실제 맵 내용과 무관하게 항상 stamina/course만 이긴다(418개 맵 실측:
+  naive 평균 비중 stamina 0.51/course 0.46, 나머지 5축 합쳐서 0.04 미만, 418개 전부 1등이 그 둘 중
+  하나). 순수 tau 비율 보정을 먼저 시도했으나 더 나빠짐(stamina 418/418 독점) — `staminaIn` 공식 안에
+  또 다른 8초 감쇠 누적기(`maxHandStamina`)가 중첩돼 있어 바깥쪽 tau 비율만으론 설명이 안 됨. 대신
+  418개 4K RC 실측 맵(무작위 9000개 스캔)에서 축별 raw 기여값의 **중앙값**을 코드 상수
+  (`AxisShareReference`)로 박아 각 축을 자기 자신의 전형적 스케일로 나눈 뒤 비중을 계산 —
+  평균 비중이 0.07~0.20 사이로 고르게 퍼지고 맵마다 1등 축이 달라짐을 확인.
 - **최소컷(위젯 세부설정 슬라이더로 조정 가능)**: `RoxyAxisRawFloor`(기본 2, LocalRawDan 미만이면 제외)
   와 `RoxyAxisShareFloorPercent`(기본 5%, Share 이하면 제외) 둘 다 통과한 축만 후보. 통과한 것 중 비중
   상위 3개.
