@@ -1098,9 +1098,32 @@ within-1-tier 100%. <4★에서 발산(원인: `chart-classifier`의 `sunnyLowEn
   UI를 막지 않고 다음 호버에서 취소된다.
 - 표시: **윗줄 = `{RC|LN}  {primary half DisplayName}` + tier variant(`--`~`++`) + 경계(`< `/`> `)
   + vibro 마크.** RC/LN 태그는 4K 10단 이하에서 단놋/롱놋 dan 구분이 안 되던 문제로 추가(2026-09-10).
-  confidence %, BPM, 지배패턴 표시는 **제거됨**(경로별 고정 상수라 정보량 없음). 하이브리드면
-  둘째 줄에 RC·LN 두 half.
+  하이브리드면 둘째 줄에 RC·LN 두 half — 단, 아래 Roxy 축 요약이 있으면 그게 둘째 줄을 대신한다.
 - `mania`가 아니면 `N/A`.
+
+**Roxy 패턴축 요약(2026-09-15 신규)** — 둘째 줄, vibro 아닌 4K RC이고 **Roxy가 실제로 라우팅을 이긴
+경우에만**(`mixed.NumericDifficultyHint == "roxy-meta-ridge-v3"` — Mixed 라우팅상 Roxy는 고난이도만
+맡고 저난이도 4K RC는 Azusa가 대신 계산하므로 전체 4K RC 중 일부에서만 뜸) Roxy의 7축
+(speed/handStream/jack/chordjack/tech/stamina/course, `RoxyEstimator.BuildAxisBreakdown`) 중 비중
+상위 3개를 표시. 축 이름은 위젯에서 스피드/핸스/미니잭/코드잭/테크/밀도/체력으로 리네임.
+
+- **가교 없음**: 이 7축은 `LazerSR.DanCalculator\Patterns\`(잭/스트림 등 ~20종 클러스터링, §패턴 분류)와
+  코드상 아무 연결이 없는 완전 별개 시스템이다 — 같은 이름(jack 등)이 겹칠 뿐, mania-hub 원본에도 둘을
+  잇는 매핑은 존재하지 않는다. 7축은 Roxy가 최종 dan 숫자를 만들 때 실제로 쓰는 구조적 신호 그 자체를
+  그대로 노출한 것.
+- **산출 방식**: `RoxyCurve.StreamSummaries[axis].Aggregate × StreamWeights[axis]`가 최종 raw 구조
+  신호(`rawAgg`)의 80%를 차지하는 항이므로, 이 축별 기여값을 정규화하면 그 축의 실제 비중(`Share`)이 된다.
+  `LocalRawDan`은 그 축의 기여값 하나만 떼어 `ComputeRoxyNumeric`과 같은 log 압축 + 선형매핑 +
+  isotonic 변환(보정/메타모델은 생략)을 통과시킨 근사치 — 화면 표시는 안 하고 최소컷 판정에만 쓴다.
+- **최소컷(위젯 세부설정 슬라이더로 조정 가능)**: `RoxyAxisRawFloor`(기본 2, LocalRawDan 미만이면 제외)
+  와 `RoxyAxisShareFloorPercent`(기본 5%, Share 이하면 제외) 둘 다 통과한 축만 후보. 통과한 것 중 비중
+  상위 3개.
+- **Sunny 저단 리라우트와의 상호작용**: `SunnyLowEndReroute`가 걸리면 `mixed`는 Sunny 값으로 교체되지만
+  `ChartClassifier.Clone()`이 `ActualEstimatorAlgorithm`/`Debug`를 원래 Roxy 결과에서 그대로 복사해오므로,
+  `NumericDifficultyHint`만으로 게이트해야 한다(리라우트 시 `null`로 초기화됨) — `ActualEstimatorAlgorithm`
+  단독 체크는 stale한 "Roxy" 값에 속아 리라우트된 차트에서도 축 요약을 잘못 띄운다.
+- 6K/7K, 4K LN-primary, Roxy 미채택 4K RC(Azusa 경로)는 전부 `RoxyAxes == null` — 기존 그대로 dan
+  텍스트만 표시.
 
 ### 결과창 dan 행 (`Drawables\DanResultRow.cs`, 2026-09-10 신규)
 
@@ -1164,11 +1187,11 @@ mania-hub `src/lib/dan-images.ts` 포팅(`getDanImageSrc`/`danBareLabel`/`danSca
 - 전부 `.iss [Files]` + Launcher `ExcludeHookDepsFromSingleFile` 양쪽에 등록.
 - MinaCalc.dll은 이미 배포되고 있어 추가 없음(DanCalculator도 같은 파일을 링크).
 
-### 25. 퍼포먼스 dan — per-play 계산 + 업로드 (2026-09-11 신규, 진행 중)
+### 25. 퍼포먼스 dan — per-play 계산 + 업로드 + 프로필 위젯 (2026-09-11 시작, 2026-09-14 v7.0.1로 완료)
 
 mania-hub의 플레이어 dan verdict(스킬셋 버킷별 dan). **판당 계산은 로컬**(맵 호버·모드 갱신에 실시간
 필요), **버킷별 windowed 합산은 서버**. 계산 로직은 이 버전으로 고정(재계산 인프라 없음).
-전체 상태·다음 작업은 `progress\2026-09-11.md`.
+세션 흐름은 `progress\2026-09-11.md`/`progress\2026-09-14.md` 참고.
 
 - **`LazerSR.DanCalculator\PlayerRating\`** — `player-skills.ts` per-play 계산부 1:1 포팅:
   `PlayEligibility`(rate/자격 게이트), `WifeGoal`(`ssrGoalForScore` + wife3), `PlaySsr`(MSD@goal + 외삽),
@@ -1180,8 +1203,18 @@ mania-hub의 플레이어 dan verdict(스킬셋 버킷별 dan). **판당 계산�
 - **`LazerSR.Hook\DanRating\`** — osu 객체 → DTO 글루. `DanPlayCollectorPatch`(`Player.ImportScore` Postfix)
   → `DanPlayRecordBuilder`(**`GetPlayableBeatmap` 인코딩** — raw `working.Beatmap`은 mania 컬럼 스크램블)
   → `DanPlayQueueWriter` → 파이프 `danplayqueued`.
-- **런처** `Replay\DanPlayServerClient.cs` — 큐 드레인 → `POST /api/v1/dan-plays`.
-- **서버** (`LazerSrReplayServer`) — `dan_plays` 테이블 + `POST/GET /api/v1/dan-plays`(저장/덤프만, 집계 미착수).
+- **런처** `Replay\DanPlayServerClient.cs` — 큐 드레인 → `POST /api/v1/dan-plays`. `psreq`/`psreqok`/`psreqerr`
+  파이프 경로로 `GET /api/v1/player-skills/<user>` 조회도 대행(Hook은 네트워크 금지, §23 리더보드와 동일 패턴).
+- **서버** (`LazerSrReplayServer`) — `dan_plays` 테이블 + `POST/GET /api/v1/dan-plays` + 버킷별 windowed
+  집계(`player-skills.ts` `collectDanClears` 이후 전체 포팅) + `GET /api/v1/player-skills/{userId}`. 완료.
+- **`LazerSR.Hook\Widgets\DanProfileWidget.cs`**(2026-09-14) — 선곡 화면 스킨 위젯. 전체(RC 헤드라인) |
+  잭/테크/스피드/스태미나 | LN(헤드라인) 6칸, 단 이미지(+/-/++/--) + raw 숫자. `LoadComplete` 시 1회 조회,
+  서버 on-write 캐시를 읽기만 함(실시간 갱신 없음). 결과창→선곡화면 복귀는 `LoadComplete`가 재발화하지
+  않으므로(서스펜드→재개일 뿐) `SongSelectEntryPatch`(`SongSelect.OnEntering`/`OnResuming` Postfix)가
+  `SongSelectEntryState.EnteredToken`(`Bindable<int>`)을 bump해 재조회를 신호한다.
+- **`LazerSR.DanCalculator\PlayerRating\Vibro\RateVibroChecker.cs`**(2026-09-14) — mania-hub
+  `shouldCheckRateVibro`/`chartVibroAtRate` 포팅. DT/HT 판의 완전미인정/부분감점/증거예외 3단계 판정을
+  `DanPlayRecordBuilder`/`DanResultRow`에 연결(결과창 퍼포먼스 dan 행에 완전미인정 시 VIBRO 표시).
 
 **MinaCalc `calc_ssr`**: DLL v505의 `calc_ssr`은 소스 `calc_at_rate(calc, rows, num, rate, goal, keycount,
 CalcMode mode)`의 rename. `mode`(1=SSR) 인자 필수 — 빠뜨리면 스택 misalign으로 0 반환. `Msd.ComputeMsd`는
@@ -1189,4 +1222,23 @@ CalcMode mode)`의 rename. `mode`(1=SSR) 인자 필수 — 빠뜨리면 스택 m
 
 **엔진**: v505 그대로 (mania-hub은 Etterna WASM 0.72.3). 4K SSR 숫자 few% 오차, argmax·6/7K 무영향.
 
-**미완**: 6/7K 미검증, rate-vibro 미연결(DT/HT parity 갭), 서버 집계 미착수. `progress\2026-09-11.md` 참고.
+**관전 오염 버그(2026-09-14 수정)**: `SpectatorPlayer`가 `Player.ImportScore`를 override 없이 상속해서
+관전 중인 남의 스코어로도 `DanPlayCollectorPatch` Postfix가 발화 → 소유권 검사 없이 그 사람 이름으로
+서버 업로드되던 버그. `ReplayCollectService` 트리거1과 동일한 `RealmUser.OnlineID` 소유권 검사를 추가해
+수정. 서버 `dan_plays`에 새어든 6건은 코드와 무관하게 운영 조치로 별도 정리함.
+
+**레거시 20K 리플레이 백필(2026-09-14 완료)**: 헤드리스 콘솔(`temp\dan-backfill`, osu.Game 비의존 —
+DB 판정 요약값 + 다운로드된 `.osu` 텍스트만으로 `PlayUploadRecordBuilder.Build` 직접 호출)로 19,127건
+스코어 중 18,942건 처리(185건은 채보 파일 없음, 실패 0). 산출 `records.jsonl`(18,577 레코드)을 서버
+`scripts\bulk_insert_dan_plays.py`(1회성, `POST /api/v1/dan-plays`와 동일 컬럼 추출 로직을 복붙해
+재계산 없이 순수 INSERT)로 `dan_plays`에 적재 후, 사용자 승인 하에 `dan_verdicts` 집계 재계산까지 서버에서
+실행 완료 — `player-skills` API가 백필 데이터를 반영한 상태.
+
+**속도 최적화 중 발견한 동시성 버그**: 백필에서 `Parallel.ForEach`로 스코어를 병렬 처리했더니 스모크
+25건 재검증에서 9건이 불일치했다 — `DanClassifier` 분류 파이프라인 내부에 스레드 세이프하지 않은 공유
+상태가 있어(정확한 위치 미조사) 서로 다른 채보를 동시에 분류하면 값이 오염된다. **순차 실행만 정답을
+보장** — 채보/배속 단위 캐싱(동시성과 무관)만 유지하고 병렬화는 되돌렸다. `DanClassifier`를 여러 스레드에서
+동시 호출하는 코드를 새로 짤 때는 이 제약을 먼저 확인할 것.
+
+**미검증(낮은 우선순위로 보류)**: 6/7K 버킷 경로(MSD 불필요, 리스크 낮음), Invert(IN) 모드는 백필 스코프
+제외.

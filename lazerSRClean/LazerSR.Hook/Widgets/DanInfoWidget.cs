@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using LazerSR.DanCalculator;
@@ -33,6 +34,28 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
 {
     public bool UsesFixedAnchor { get; set; }
 
+    // Roxy's internal axis names -> the display names the user chose. Only
+    // shown for 4K RC charts where Roxy itself won the routing (see
+    // ChartClassification.RoxyAxes); everything else keeps the plain dan text.
+    private static readonly Dictionary<string, string> roxyAxisDisplayNames = new()
+    {
+        ["speed"] = "스피드",
+        ["handStream"] = "핸스",
+        ["jack"] = "미니잭",
+        ["chordjack"] = "코드잭",
+        ["tech"] = "테크",
+        ["stamina"] = "밀도",
+        ["course"] = "체력",
+    };
+
+    [SettingSource("Roxy 패턴축 최소 raw 기준")]
+    public BindableNumber<float> RoxyAxisRawFloor { get; } =
+        new BindableFloat(2) { MinValue = -2, MaxValue = 15, Precision = 0.5f };
+
+    [SettingSource("Roxy 패턴축 최소 비중 (%)")]
+    public BindableNumber<float> RoxyAxisShareFloorPercent { get; } =
+        new BindableFloat(5) { MinValue = 0, MaxValue = 50, Precision = 1 };
+
     [Resolved(canBeNull: true)]
     private GameplayState? gameplayState { get; set; }
 
@@ -49,6 +72,7 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
     private OsuSpriteText detailLine = null!;
     private CancellationTokenSource? cts;
     private ModSettingChangeTracker? _modTracker;
+    private ChartClassification? lastClassification;
 
     public DanInfoWidget()
     {
@@ -90,6 +114,11 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
     protected override void LoadComplete()
     {
         base.LoadComplete();
+
+        // Slider tweaks re-render the already-classified map instantly instead
+        // of waiting for the next map/mod change to re-run the heavy classify.
+        RoxyAxisRawFloor.BindValueChanged(_ => renderCurrent());
+        RoxyAxisShareFloorPercent.BindValueChanged(_ => renderCurrent());
 
         if (gameplayState != null)
         {
@@ -150,7 +179,7 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
 
                 if (playable is not ManiaBeatmap)
                 {
-                    publish(token, string.Empty, string.Empty);
+                    publish(token, null);
                     return;
                 }
 
@@ -168,8 +197,7 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
 
                 if (token.IsCancellationRequested) return;
 
-                var (main, detail) = format(classification);
-                publish(token, main, detail);
+                publish(token, classification);
             }
             catch (OperationCanceledException) { }
             catch (Exception e)
@@ -179,24 +207,35 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
         }, token);
     }
 
-    private void publish(CancellationToken token, string main, string detail)
+    private void publish(CancellationToken token, ChartClassification? classification)
     {
         Schedule(() =>
         {
             if (token.IsCancellationRequested) return;
-            if (string.IsNullOrEmpty(main))
-            {
-                danLine.Text = "N/A";
-                detailLine.Text = string.Empty;
-                danLine.Alpha = 0.6f;
-                return;
-            }
-
-            danLine.Text = main;
-            detailLine.Text = detail;
-            danLine.Alpha = 1f;
-            detailLine.Alpha = string.IsNullOrEmpty(detail) ? 0f : 0.85f;
+            lastClassification = classification;
+            renderCurrent();
         });
+    }
+
+    // Re-renders lastClassification with the widget's current settings —
+    // called both after a fresh classify and when the axis-floor sliders move,
+    // so slider tweaks don't need a map re-select to take effect.
+    private void renderCurrent()
+    {
+        var (main, detail) = lastClassification != null ? format(lastClassification) : (string.Empty, string.Empty);
+
+        if (string.IsNullOrEmpty(main))
+        {
+            danLine.Text = "N/A";
+            detailLine.Text = string.Empty;
+            danLine.Alpha = 0.6f;
+            return;
+        }
+
+        danLine.Text = main;
+        detailLine.Text = detail;
+        danLine.Alpha = 1f;
+        detailLine.Alpha = string.IsNullOrEmpty(detail) ? 0f : 0.85f;
     }
 
     private static string encodeToOsu(IBeatmap beatmap)
@@ -206,22 +245,51 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
         return writer.ToString();
     }
 
-    private static (string Main, string Detail) format(ChartClassification c)
+    private (string Main, string Detail) format(ChartClassification c)
     {
         var primary = c.Primary;
         if (!c.Supported || primary == null)
             return (string.Empty, string.Empty);
 
         // Top line always tags RC (tap) vs LN so a 4K sub-10 verdict is not ambiguous.
+        // The vibro warning here is unchanged from before — it always wins over
+        // the axis summary below, which is skipped entirely on a vibro chart.
         string sideTag = primary.Kind == "ln" ? "LN" : "RC";
         string main = $"{sideTag}  {half(primary)}{(c.Vibro ? "  ⚠VIBRO" : "")}";
 
-        // Second line: the other half, shown only for hybrids where it differs.
-        string detail = string.Empty;
-        if (c.Rc != null && c.Ln != null && half(c.Rc) != half(c.Ln))
+        // Second line: Roxy's top pattern axes when this chart's verdict actually
+        // came from Roxy (4K RC only — see RoxyAxes). Falls back to the RC/LN
+        // hybrid detail when Roxy didn't run or nothing clears the floors.
+        string? axisSummary = c.Vibro ? null : buildAxisSummary(c.RoxyAxes);
+        string detail;
+        if (axisSummary != null)
+            detail = axisSummary;
+        else if (c.Rc != null && c.Ln != null && half(c.Rc) != half(c.Ln))
             detail = $"RC {half(c.Rc)}  ·  LN {half(c.Ln)}";
+        else
+            detail = string.Empty;
 
         return (main, detail);
+    }
+
+    // Top 3 of Roxy's 7 axes by share of the structural signal, excluding any
+    // axis whose local raw-dan-equivalent or share doesn't clear the sliders'
+    // floors. Both floors are user-tunable in the skin editor.
+    private string? buildAxisSummary(List<RoxyAxisContribution>? axes)
+    {
+        if (axes == null || axes.Count == 0) return null;
+
+        double rawFloor = RoxyAxisRawFloor.Value;
+        double shareFloor = RoxyAxisShareFloorPercent.Value / 100.0;
+
+        var picked = axes
+            .Where(a => a.LocalRawDan >= rawFloor && a.Share > shareFloor)
+            .OrderByDescending(a => a.Share)
+            .Take(3)
+            .Select(a => roxyAxisDisplayNames.TryGetValue(a.Axis, out var name) ? name : a.Axis)
+            .ToList();
+
+        return picked.Count > 0 ? string.Join("  ·  ", picked) : null;
     }
 
     private static string half(DanVerdictHalf h) => $"{boundaryMark(h.Boundary)}{h.DisplayName}";

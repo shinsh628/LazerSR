@@ -65,6 +65,27 @@ public sealed class ChartClassification
     /// </summary>
     public bool CompanellaPending;
     public List<string> Warnings = new();
+    /// <summary>
+    /// Roxy's 7-axis structural breakdown (speed/handStream/jack/chordjack/tech/
+    /// stamina/course), each axis's share of the raw structural signal plus an
+    /// approximate per-axis raw-dan-equivalent. Non-null ONLY when Roxy actually
+    /// won the routing for this chart's RC verdict (4K RC, high enough difficulty
+    /// to clear Roxy's scope — lower-difficulty 4K RC routes to Azusa instead and
+    /// this stays null). Display-only ranking signal; not a real per-axis dan.
+    /// </summary>
+    public List<RoxyAxisContribution>? RoxyAxes;
+}
+
+/// <summary>One axis of Roxy's structural breakdown. <see cref="Axis"/> is the
+/// internal Roxy stream name ("speed"/"handStream"/"jack"/"chordjack"/"tech"/
+/// "stamina"/"course") — display naming is a UI concern, not this type's.</summary>
+public sealed class RoxyAxisContribution
+{
+    public string Axis = "";
+    /// <summary>0..1 share of Roxy's weighted structural aggregate.</summary>
+    public double Share;
+    /// <summary>Approximate raw-dan-equivalent if this axis alone drove the chart.</summary>
+    public double LocalRawDan;
 }
 
 /// <summary>JS `ClassifyChartInput extends DanEstimateInput`.</summary>

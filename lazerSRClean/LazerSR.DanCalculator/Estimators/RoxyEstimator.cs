@@ -1276,6 +1276,45 @@ public static class RoxyEstimator
         };
     }
 
+    // Per-axis (StreamNames) share of the primary raw structural signal
+    // (WeightedAgg, 80% of rawAgg — see ComputeRoxyNumeric) plus an approximate
+    // "as-if this axis alone were the whole chart" raw-dan-equivalent, computed
+    // by running that axis's own weighted aggregate through the SAME log
+    // compression / linear map / isotonic knots the composite signal uses.
+    // Corrections and the meta-ridge model are NOT applied here — those are
+    // whole-chart context (OD, reference-gap, marathon...) that has no
+    // per-axis meaning — so this is a rough display-only ranking signal, not
+    // a real per-axis dan verdict. Consumed by ChartClassifier only when this
+    // Roxy result actually wins the routing (numericDifficultyHint ==
+    // "roxy-meta-ridge-v3"), for the dan-info widget's pattern-axis summary.
+    private static Dictionary<string, object?> BuildAxisBreakdown(RoxyCurve curve)
+    {
+        var contribs = new double[StreamNames.Length];
+        double total = 0;
+        for (int s = 0; s < StreamNames.Length; s += 1)
+        {
+            double aggregate = curve.StreamSummaries.TryGetValue(StreamNames[s], out var summary) ? summary.Aggregate : 0;
+            double contrib = Math.Max(0, StreamWeights[s] * aggregate);
+            contribs[s] = contrib;
+            total += contrib;
+        }
+
+        var result = new Dictionary<string, object?>();
+        for (int s = 0; s < StreamNames.Length; s += 1)
+        {
+            double share = total > 0 ? contribs[s] / total : 0;
+            double logRaw = Math.Log(1 + contribs[s]);
+            double preNumeric = Clamp(LinearMap(logRaw, CfgRawMapP02, CfgRawMapP98, -2, 20), -2.5, 21);
+            double localRawDan = Clamp(PiecewiseLinear(preNumeric, IsotonicKnots), -2, 20);
+            result[StreamNames[s]] = new Dictionary<string, object?>
+            {
+                ["share"] = Fmt4(share),
+                ["localRawDan"] = Fmt4(localRawDan),
+            };
+        }
+        return result;
+    }
+
     private static RoxyCorrections ComputeCorrections(RoxyStats stats)
     {
         double lowCj = 0.75
@@ -1955,6 +1994,7 @@ public static class RoxyEstimator
             ComputeNpsRows(rows, tapTimes);
             var activity = ComputeActivityStats(rows, taps.Count);
             var curve = ComputeRoxyCurve(rows, taps, activity);
+            var axisBreakdown = BuildAxisBreakdown(curve);
             var numericDetails = ComputeRoxyNumeric(curve);
             double structuralNumeric = Math.Round(numericDetails.Numeric, 2, MidpointRounding.AwayFromZero);
 
@@ -2141,6 +2181,7 @@ public static class RoxyEstimator
                     ["stats"] = curve.Stats.ToDebugDict(),
                     ["corrections"] = numericDetails.Corrections.ToDebugDict(),
                     ["streams"] = streamsDebug,
+                    ["axisBreakdown"] = axisBreakdown,
                 },
             };
         }

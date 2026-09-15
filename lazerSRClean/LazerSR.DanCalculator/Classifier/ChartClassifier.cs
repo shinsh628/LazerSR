@@ -340,6 +340,25 @@ public static class ChartClassifier
             warnings.Add($"LeoBlack estimator failed: {error.Message}.");
         }
 
+        // Only a genuine (non-rerouted) Roxy verdict sets this hint — the Sunny
+        // low-end reroute below clears it on its cloned result while keeping the
+        // original Debug bag, so gating on the hint (not just Debug presence)
+        // keeps a stale axis breakdown off a chart Roxy no longer actually rates.
+        List<RoxyAxisContribution>? roxyAxes = null;
+        if (mixed?.NumericDifficultyHint == "roxy-meta-ridge-v3"
+            && mixed.Debug.TryGetValue("axisBreakdown", out var axisRaw)
+            && axisRaw is Dictionary<string, object?> axisDict)
+        {
+            roxyAxes = new List<RoxyAxisContribution>();
+            foreach (var (axisName, entryRaw) in axisDict)
+            {
+                if (entryRaw is not Dictionary<string, object?> entry) continue;
+                double share = entry.TryGetValue("share", out var s) && s is double sd ? sd : 0;
+                double localRawDan = entry.TryGetValue("localRawDan", out var l) && l is double ld ? ld : 0;
+                roxyAxes.Add(new RoxyAxisContribution { Axis = axisName, Share = share, LocalRawDan = localRawDan });
+            }
+        }
+
         string? verdictText = mixed != null ? (mixed.EstDiff ?? "").Trim() : null;
         bool verdictUsable = verdictText != null && verdictText.Length > 0
             && !InvalidRe.IsMatch(verdictText) && !UnknownRe.IsMatch(verdictText);
@@ -494,6 +513,7 @@ public static class ChartClassifier
             DanEligibility = danEligibility,
             CompanellaPending = mixed?.MixedCompanellaPlan != null,
             Warnings = warnings,
+            RoxyAxes = roxyAxes,
         };
     }
 
