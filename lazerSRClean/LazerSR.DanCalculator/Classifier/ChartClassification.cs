@@ -66,53 +66,41 @@ public sealed class ChartClassification
     public bool CompanellaPending;
     public List<string> Warnings = new();
     /// <summary>
-    /// Roxy's 7-axis structural breakdown (speed/handStream/jack/chordjack/tech/
-    /// stamina/course), each axis's share of the raw structural signal plus an
-    /// approximate per-axis raw-dan-equivalent. Non-null ONLY when Roxy actually
-    /// won the routing for this chart's RC verdict (4K RC, high enough difficulty
-    /// to clear Roxy's scope — lower-difficulty 4K RC routes to Azusa instead and
-    /// this stays null). Display-only ranking signal; not a real per-axis dan.
+    /// LeoBlack pattern clusters (native output of the pattern analyzer — RC/LN/
+    /// HB/Mix mode-tag and keycount handled entirely by the analyzer itself, no
+    /// manual filtering here) joined against a per-map difficulty-over-time
+    /// curve: each pattern's share of the chart's time span, plus its typical
+    /// curve value relative to the chart's own peak (0..1). Computed for every
+    /// 4/6/7K chart, RC or LN — 4K uses Roxy's structural section curve when
+    /// Roxy's own eligibility gates allow it (independent of whether Roxy wins
+    /// the headline dan verdict), Sunny's raw per-object strain timeline
+    /// otherwise. Null only when the underlying pattern analysis or both
+    /// difficulty sources fail outright (2026-09-15).
     /// </summary>
-    public List<RoxyAxisContribution>? RoxyAxes;
-    /// <summary>
-    /// LeoBlack pattern-window types (Stream/Chordstream/Jacks core, RC scope
-    /// only — Coordination/Density/Wildcard excluded) joined against Roxy's
-    /// 400ms section-difficulty curve: each pattern's share of the chart's time
-    /// span, plus its typical section value relative to the chart's own peak
-    /// section (0..1). Non-null ONLY under the same Roxy-won-routing condition
-    /// as <see cref="RoxyAxes"/>. This — not RoxyAxes — is the "which named
-    /// pattern, and how much does it matter" signal (2026-09-15).
-    /// </summary>
-    public List<RoxyPatternDifficulty>? RoxyPatterns;
+    public List<ChartPatternDifficulty>? PatternDifficulties;
 }
 
 /// <summary>One LeoBlack pattern type's time-share + relative difficulty within
 /// one chart. <see cref="Pattern"/> is the core category (Stream/Chordstream/
-/// Jacks); <see cref="SpecificType"/> is the display name (e.g. "Trills",
-/// "Chordjacks") — falls back to Pattern when no specific type won.</summary>
-public sealed class RoxyPatternDifficulty
+/// Jacks/Coordination/Density/Wildcard); <see cref="SpecificType"/> is the
+/// display name (e.g. "Trills", "Chordjacks", "Inverse") — falls back to
+/// Pattern when no specific type won.</summary>
+public sealed class ChartPatternDifficulty
 {
     public string Pattern = "";
     public string SpecificType = "";
     /// <summary>0..1+ share of the chart's time span this pattern covers
     /// (union of its windows' intervals, not a raw duration sum).</summary>
     public double TimeShare;
-    /// <summary>0..1: this pattern's typical Roxy section value divided by the
-    /// chart's own peak section value — "how close to this chart's hardest
+    /// <summary>0..1: this pattern's typical difficulty-curve value divided by
+    /// the chart's own peak curve value — "how close to this chart's hardest
     /// moment" rather than any cross-chart dan-scale comparison.</summary>
     public double RelativeIntensity;
-}
-
-/// <summary>One axis of Roxy's structural breakdown. <see cref="Axis"/> is the
-/// internal Roxy stream name ("speed"/"handStream"/"jack"/"chordjack"/"tech"/
-/// "stamina"/"course") — display naming is a UI concern, not this type's.</summary>
-public sealed class RoxyAxisContribution
-{
-    public string Axis = "";
-    /// <summary>0..1 share of Roxy's weighted structural aggregate.</summary>
-    public double Share;
-    /// <summary>Approximate raw-dan-equivalent if this axis alone drove the chart.</summary>
-    public double LocalRawDan;
+    /// <summary>Raw (start, end) windows (ms, original .osu time axis) this
+    /// pattern was detected in — the union of these is what TimeShare measures.
+    /// Exposed for external visualization only; not used by the widget's own
+    /// top-3 text summary.</summary>
+    public List<(double Start, double End)> Intervals = new();
 }
 
 /// <summary>JS `ClassifyChartInput extends DanEstimateInput`.</summary>

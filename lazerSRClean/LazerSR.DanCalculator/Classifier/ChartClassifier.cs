@@ -340,31 +340,20 @@ public static class ChartClassifier
             warnings.Add($"LeoBlack estimator failed: {error.Message}.");
         }
 
-        // Only a genuine (non-rerouted) Roxy verdict sets this hint — the Sunny
-        // low-end reroute below clears it on its cloned result while keeping the
-        // original Debug bag, so gating on the hint (not just Debug presence)
-        // keeps a stale axis breakdown off a chart Roxy no longer actually rates.
-        List<RoxyAxisContribution>? roxyAxes = null;
-        if (mixed?.NumericDifficultyHint == "roxy-meta-ridge-v3"
-            && mixed.Debug.TryGetValue("axisBreakdown", out var axisRaw)
-            && axisRaw is Dictionary<string, object?> axisDict)
+        // Universal pattern-vs-difficulty overlay — every 4/6/7K chart, RC or LN
+        // (see BuildPatternDifficulty). Independent of the dan verdict routing
+        // above: it runs its own Roxy/Sunny calls rather than reusing `mixed`,
+        // since `mixed` only carries Roxy's curve when Roxy actually won the
+        // headline verdict, and this wants Roxy whenever Roxy is technically
+        // eligible regardless of who wins.
+        List<ChartPatternDifficulty>? patternDifficulties = null;
+        try
         {
-            roxyAxes = new List<RoxyAxisContribution>();
-            foreach (var (axisName, entryRaw) in axisDict)
-            {
-                if (entryRaw is not Dictionary<string, object?> entry) continue;
-                double share = entry.TryGetValue("share", out var s) && s is double sd ? sd : 0;
-                double localRawDan = entry.TryGetValue("localRawDan", out var l) && l is double ld ? ld : 0;
-                roxyAxes.Add(new RoxyAxisContribution { Axis = axisName, Share = share, LocalRawDan = localRawDan });
-            }
+            patternDifficulties = BuildPatternDifficulty(map, osuText, rate, clusters?.Report);
         }
-
-        List<RoxyPatternDifficulty>? roxyPatterns = null;
-        if (mixed?.NumericDifficultyHint == "roxy-meta-ridge-v3"
-            && mixed.Debug.TryGetValue("sectionCurve", out var sectionCurveRaw) && sectionCurveRaw is List<Dictionary<string, object?>> sectionCurveList
-            && mixed.Debug.TryGetValue("speedRateMode", out var speedRateModeRaw) && speedRateModeRaw is Dictionary<string, object?> speedRateMode)
+        catch (Exception error)
         {
-            roxyPatterns = BuildRoxyPatternDifficulty(osuText, sectionCurveList, speedRateMode);
+            warnings.Add($"Pattern difficulty overlay failed: {error.Message}.");
         }
 
         string? verdictText = mixed != null ? (mixed.EstDiff ?? "").Trim() : null;
@@ -521,8 +510,7 @@ public static class ChartClassifier
             DanEligibility = danEligibility,
             CompanellaPending = mixed?.MixedCompanellaPlan != null,
             Warnings = warnings,
-            RoxyAxes = roxyAxes,
-            RoxyPatterns = roxyPatterns,
+            PatternDifficulties = patternDifficulties,
         };
     }
 
@@ -536,101 +524,253 @@ public static class ChartClassifier
     // so section timestamps are reversed back to the original file's time axis
     // using the speedRateMode debug block before comparing against pattern
     // window Start/End (which FindPatterns reads unscaled from osuText).
-    private static List<RoxyPatternDifficulty> BuildRoxyPatternDifficulty(
-        string osuText, List<Dictionary<string, object?>> sectionCurveDebug, Dictionary<string, object?> speedRateMode)
+    // One difficulty-curve segment: covers [Start, End) at Value. Both curve
+    // sources (Roxy's fixed 400ms sections and Sunny's per-object samples,
+    // turned into segments by pairing consecutive points) reduce to this same
+    // shape so BuildPatternDifficulty only needs one overlap-join routine.
+    private readonly record struct CurveSegment(double Start, double End, double Value);
+
+    /// <summary>
+    /// Joins the pattern analyzer's native cluster output (RC/LN/HB/Mix mode-tag,
+    /// keycount-specific pattern tables — all handled by PatternService itself,
+    /// no manual filtering here) against a per-map difficulty-over-time curve:
+    /// 4K uses Roxy's structural section curve whenever Roxy's own eligibility
+    /// gates allow it (independent of whether Roxy wins the headline dan verdict
+    /// computed elsewhere in ClassifyChart — this runs its own Roxy pass), Sunny's
+    /// raw per-object strain timeline otherwise (6/7K always, and any 4K chart
+    /// Roxy can't handle). Returns null when clustering produced nothing or
+    /// neither difficulty source is available.
+    /// </summary>
+    // Merge-group sentinels used only as GroupKey values inside BuildPatternDifficulty.
+    private const string StreamChordstreamShellKey = "__stream_chordstream_shell__";
+    private const string LongJabKey = "__longjab__";
+
+    private static readonly HashSet<string> LongJabMembers = new() { "Column Lock", "JS Density", "HS Density" };
+
+    // User-specified Korean display names (2026-09-16, 4K pass). A specific
+    // type not listed here (6/7K-only names, not yet translated) falls back
+    // to its English name as-is.
+    private static readonly Dictionary<string, string> KoreanDisplayName = new()
     {
-        static double AsDouble(object? o) => o is double d ? d : 0;
+        [StreamChordstreamShellKey] = "덤프",
+        [CorePattern.Jacks] = "테크",
+        ["Rolls"] = "스피드",
+        ["Trills"] = "트릴",
+        ["Minitrills"] = "미니트릴",
+        ["Handstream"] = "핸스",
+        ["Jumpstream"] = "점스",
+        ["Jumptrill"] = "점트",
+        ["Split Trill"] = "거미줄",
+        ["Chordjacks"] = "코잭",
+        ["Minijacks"] = "미니잭",
+        ["Longjacks"] = "축연타",
+        ["Quadstream"] = "빅장",
+        ["Gluts"] = "손분리",
+        [LongJabKey] = "롱잡",
+        ["Shield"] = "쉴드",
+        ["Release"] = "릴리즈",
+        ["Inverse"] = "인버스",
+        ["Jacky WC"] = "롱테크",
+        ["Speedy WC"] = "롱스트림",
+    };
 
-        double originalFirst = AsDouble(speedRateMode.GetValueOrDefault("originalFirstObjectMs"));
-        double analysisRate = speedRateMode.TryGetValue("analysisSpeedRate", out var arv) && arv is double ard && ard > 0 ? ard : 1.0;
-        double canonicalFirst = AsDouble(speedRateMode.GetValueOrDefault("canonicalFirstObjectMs"));
-        if (canonicalFirst <= 0) canonicalFirst = 1000;
-        const double sectionMs = 400.0;
+    private static List<ChartPatternDifficulty>? BuildPatternDifficulty(
+        ManiaBeatmap map, string osuText, double rate, LeoBlackPatternReport? report)
+    {
+        if (report == null || report.Duration <= 0) return null;
 
-        var curve = sectionCurveDebug
-            .Select(e => (
-                AtMs: (AsDouble(e.GetValueOrDefault("atMs")) - canonicalFirst) * analysisRate + originalFirst,
-                Value: AsDouble(e.GetValueOrDefault("value"))))
-            .OrderBy(c => c.AtMs)
-            .ToList();
-        if (curve.Count == 0) return new List<RoxyPatternDifficulty>();
-        double peak = curve.Max(c => c.Value);
-        if (peak <= 0) return new List<RoxyPatternDifficulty>();
+        // Raw per-window matches (FindPatterns' own output, one entry per
+        // matched 8-row scan position) rather than report.Clusters — Clusters
+        // is already collapsed to one dominant specific type PER CORE PATTERN
+        // (at most 6 rows total, one per Stream/Chordstream/Jacks/Coordination/
+        // Density/Wildcard), so two named specific types sharing a core (e.g.
+        // Trills and Handstream, both under Stream) could never appear side by
+        // side. Grouping the raw matches by specific type instead removes that
+        // per-core cap entirely: every specific type that clears the curve/
+        // share floors gets its own row, regardless of how many share a core.
+        var matches = PatternService.FindPatternWindows(osuText);
+        if (matches.Count == 0) return null;
 
-        List<FoundPattern> windows;
-        try { windows = PatternService.FindPatternWindows(osuText); }
-        catch { return new List<RoxyPatternDifficulty>(); }
-
-        // RC scope only — LN-driven core patterns (Coordination/Density/Wildcard)
-        // have no place on a Roxy (4K RC, LN ratio <= 0.18) chart's pattern summary.
-        var rcCores = new HashSet<string> { CorePattern.Stream, CorePattern.Chordstream, CorePattern.Jacks };
-        var rcWindows = windows.Where(w => rcCores.Contains(w.Pattern)).ToList();
-        if (rcWindows.Count == 0) return new List<RoxyPatternDifficulty>();
-
-        double chartSpan = Math.Max(1, rcWindows.Max(w => w.End) - rcWindows.Min(w => w.Start));
+        List<CurveSegment>? curve = map.KeyCount == 4 ? TryBuildRoxyCurve(osuText, rate) : null;
+        curve ??= TryBuildSunnyCurve(osuText, rate);
+        if (curve == null || curve.Count == 0) return null;
+        double peak = curve.Max(s => s.Value);
+        if (peak <= 0) return null;
 
         (double Avg, int Count) OverlapAvg(double startMs, double endMs)
         {
             double sum = 0;
             int count = 0;
-            foreach (var section in curve)
+            foreach (var segment in curve)
             {
-                if (section.AtMs < endMs && section.AtMs + sectionMs > startMs)
+                if (segment.Start < endMs && segment.End > startMs)
                 {
-                    sum += section.Value;
+                    sum += segment.Value;
                     count += 1;
                 }
             }
             return count > 0 ? (sum / count, count) : (0, 0);
         }
 
-        var result = new List<RoxyPatternDifficulty>();
-        foreach (var group in rcWindows.GroupBy(w => (w.Pattern, Specific: w.SpecificType ?? w.Pattern)))
+        // Display naming (2026-09-16, user-specified Korean names): a match
+        // with no specific type resolved is a "plain" core hit. For Coordination/
+        // Density/Wildcard that plain-core bucket exists purely to gate its
+        // specific matchers and carries no display meaning on its own —
+        // dropped entirely (empty GroupKey). Jacks' plain-core bucket (a raw
+        // jack with none of Chordjacks/Minijacks/Longjacks/Quadstream/Gluts
+        // resolved) is kept and shown as "테크" instead — no exclusivity check
+        // against other cores' specific matches overlapping the same time; any
+        // Jacks-core match without a Jacks specific type counts, regardless of
+        // what else is going on at that moment. For Stream/Chordstream the
+        // plain-core buckets of BOTH cores merge into one combined "덤프"
+        // entry instead (their own named specific types are untouched).
+        // Column Lock/JS Density/HS Density (three distinct specific types,
+        // two different cores) merge into one "롱잡" entry. Everything else
+        // keeps its own row under its Korean name.
+        string GroupKey(FoundPattern m)
         {
-            // FindPatterns' scan windows routinely overlap (multi-label same-window
-            // matching is intentional), so time coverage needs an interval union —
-            // summing window durations directly can exceed the chart's own span.
-            var intervals = group.Select(w => (w.Start, w.End)).OrderBy(i => i.Start).ToList();
-            double unionMs = 0;
-            double curStart = intervals[0].Start, curEnd = intervals[0].End;
-            foreach (var (start, end) in intervals)
+            if (m.SpecificType == null)
             {
-                if (start > curEnd)
-                {
-                    unionMs += curEnd - curStart;
-                    curStart = start;
-                    curEnd = end;
-                }
-                else
-                {
-                    curEnd = Math.Max(curEnd, end);
-                }
+                if (m.Pattern == CorePattern.Stream || m.Pattern == CorePattern.Chordstream) return StreamChordstreamShellKey;
+                if (m.Pattern == CorePattern.Jacks) return CorePattern.Jacks;
+                return ""; // Coordination/Density/Wildcard plain-core — excluded
             }
-            unionMs += curEnd - curStart;
+            return LongJabMembers.Contains(m.SpecificType) ? LongJabKey : m.SpecificType;
+        }
 
-            // Windows before Roxy's own analyzed row range (a short lead-in Roxy's
-            // row-builder treats differently than the pattern parser) have no
-            // overlapping section — excluded rather than counted as a false zero.
-            double weightedSum = 0, weightedDuration = 0;
-            foreach (var window in group)
+        var grouped = matches
+            .Select(m => (Match: m, Key: GroupKey(m)))
+            .Where(t => t.Key.Length > 0)
+            .GroupBy(t => t.Key)
+            .Select(g => new
             {
-                var (avg, count) = OverlapAvg(window.Start, window.End);
+                Pattern = g.First().Match.Pattern,
+                SpecificType = KoreanDisplayName.TryGetValue(g.Key, out var korean) ? korean : g.Key,
+                Intervals = g.Select(t => (t.Match.Start, t.Match.End)).ToList(),
+            });
+
+        var result = new List<ChartPatternDifficulty>();
+        foreach (var cluster in grouped)
+        {
+            // Windows outside the difficulty curve's own analyzed range (a short
+            // lead-in the two independent parsers can treat slightly differently)
+            // have no overlapping segment — excluded rather than counted as zero.
+            double weightedSum = 0, weightedDuration = 0;
+            foreach (var (start, end) in cluster.Intervals)
+            {
+                var (avg, count) = OverlapAvg(start, end);
                 if (count == 0) continue;
-                double duration = Math.Max(1, window.End - window.Start);
+                double duration = Math.Max(1, end - start);
                 weightedSum += avg * duration;
                 weightedDuration += duration;
             }
             if (weightedDuration <= 0) continue;
 
-            result.Add(new RoxyPatternDifficulty
+            result.Add(new ChartPatternDifficulty
             {
-                Pattern = group.Key.Pattern,
-                SpecificType = group.Key.Specific,
-                TimeShare = unionMs / chartSpan,
+                Pattern = cluster.Pattern,
+                SpecificType = cluster.SpecificType,
+                TimeShare = UnionMs(cluster.Intervals) / report.Duration,
                 RelativeIntensity = Math.Clamp((weightedSum / weightedDuration) / peak, 0, 1),
+                Intervals = cluster.Intervals,
             });
         }
-        return result.OrderByDescending(r => r.TimeShare).ToList();
+        return result.Count > 0 ? result.OrderByDescending(r => r.TimeShare).ToList() : null;
+    }
+
+    // A correct interval union — LeoBlackPatternCluster.Amount (Clustering.
+    // PatternAmount, a faithful port of the original JS) resets its running
+    // start to the NEXT interval's start whenever that interval extends the
+    // reach, even when it still overlaps the current run. For the sliding-
+    // window match sequences FindPatterns produces (each step's window
+    // overlapping the last by all but one row), that repeatedly re-adds
+    // already-covered time — a long sustained pattern can come back inflated
+    // by roughly its own window length per step (measured: "Chordjacks 178%"
+    // on a real chart). Amount is left as-is elsewhere (Categorise/Importance
+    // ranking) since fixing it there is out of scope here; this recomputes
+    // real time coverage from the same raw Intervals for TimeShare specifically.
+    private static double UnionMs(List<(double Start, double End)> intervals)
+    {
+        if (intervals.Count == 0) return 0;
+        var sorted = intervals.OrderBy(i => i.Start).ToList();
+        double total = 0;
+        double curStart = sorted[0].Start, curEnd = sorted[0].End;
+        for (int i = 1; i < sorted.Count; i += 1)
+        {
+            var (start, end) = sorted[i];
+            if (start > curEnd)
+            {
+                total += curEnd - curStart;
+                curStart = start;
+                curEnd = end;
+            }
+            else
+            {
+                curEnd = Math.Max(curEnd, end);
+            }
+        }
+        total += curEnd - curStart;
+        return total;
+    }
+
+    // Roxy canonicalizes its own time axis before analysis (shifts the first
+    // object to a fixed offset, scales by rate) — reverse that using the
+    // speedRateMode debug block so segments land on the same time axis
+    // PatternService's Start/End (raw, unscaled .osu note times) use. Returns
+    // null whenever Roxy can't produce a curve for this chart at all (not 4K,
+    // LN ratio too high, too few taps, parse/internal errors) — the caller
+    // falls back to Sunny in every such case, regardless of the reason.
+    private static List<CurveSegment>? TryBuildRoxyCurve(string osuText, double rate)
+    {
+        RcEstimatorResult roxy;
+        try { roxy = RoxyEstimator.RunRoxyEstimatorFromText(osuText, new EstimatorOptions { SpeedRate = rate }); }
+        catch { return null; }
+
+        if (!roxy.Debug.TryGetValue("sectionCurve", out var curveRaw) || curveRaw is not List<Dictionary<string, object?>> curveList) return null;
+        if (!roxy.Debug.TryGetValue("speedRateMode", out var srmRaw) || srmRaw is not Dictionary<string, object?> speedRateMode) return null;
+
+        static double AsDouble(object? o) => o is double d ? d : 0;
+        double originalFirst = AsDouble(speedRateMode.GetValueOrDefault("originalFirstObjectMs"));
+        double analysisRate = speedRateMode.TryGetValue("analysisSpeedRate", out var arv) && arv is double ard && ard > 0 ? ard : 1.0;
+        double canonicalFirst = AsDouble(speedRateMode.GetValueOrDefault("canonicalFirstObjectMs"));
+        if (canonicalFirst <= 0) canonicalFirst = 1000;
+        const double sectionMs = 400.0;
+
+        var segments = curveList
+            .Select(e => (
+                AtMs: (AsDouble(e.GetValueOrDefault("atMs")) - canonicalFirst) * analysisRate + originalFirst,
+                Value: AsDouble(e.GetValueOrDefault("value"))))
+            .OrderBy(s => s.AtMs)
+            .Select(s => new CurveSegment(s.AtMs, s.AtMs + sectionMs, s.Value))
+            .ToList();
+        return segments.Count > 0 ? segments : null;
+    }
+
+    // Sunny's own object time axis — no canonicalization, no reversal needed.
+    // Per-object points are turned into contiguous segments by pairing each
+    // point with the next (last point extends by the median gap) so the same
+    // overlap-join used for Roxy's fixed sections applies unchanged.
+    private static List<CurveSegment>? TryBuildSunnyCurve(string osuText, double rate)
+    {
+        SunnyResult sunny;
+        try { sunny = SunnyShim.Run(osuText, rate, null, null, withGraph: true); }
+        catch { return null; }
+
+        if (sunny.Graph is not { } graph || graph.Times.Length < 2) return null;
+        var order = Enumerable.Range(0, graph.Times.Length).OrderBy(i => graph.Times[i]).ToArray();
+        var gaps = new List<double>();
+        for (int i = 1; i < order.Length; i += 1) gaps.Add(graph.Times[order[i]] - graph.Times[order[i - 1]]);
+        gaps.Sort();
+        double medianGap = gaps.Count > 0 ? gaps[gaps.Count / 2] : 1000;
+
+        var segments = new List<CurveSegment>(order.Length);
+        for (int i = 0; i < order.Length; i += 1)
+        {
+            double start = graph.Times[order[i]];
+            double end = i + 1 < order.Length ? graph.Times[order[i + 1]] : start + medianGap;
+            segments.Add(new CurveSegment(start, Math.Max(start + 1, end), graph.Values[order[i]]));
+        }
+        return segments;
     }
 
     public static SkillScores BuildSkillScores(DanVerdictHalf primary)

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using LazerSR.DanCalculator;
@@ -19,6 +20,7 @@ using osu.Game.Graphics.Sprites;
 using osu.Game.Rulesets;
 using osu.Game.Rulesets.Mania.Beatmaps;
 using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects;
 using osu.Game.Screens.Play;
 using osu.Game.Skinning;
 
@@ -34,16 +36,18 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
 {
     public bool UsesFixedAnchor { get; set; }
 
-    // Only shown for 4K RC charts where Roxy itself won the routing (see
-    // ChartClassification.RoxyPatterns); everything else keeps the plain dan
-    // text. Names are LeoBlack's own pattern names (Trills, Chordjacks, ...),
-    // shown verbatim — no display renaming.
-    [SettingSource("패턴 최소 비중 (%)")]
-    public BindableNumber<float> PatternShareFloorPercent { get; } =
-        new BindableFloat(5) { MinValue = 0, MaxValue = 50, Precision = 1 };
-
-    [SettingSource("패턴 최소 상대강도 (%)")]
-    public BindableNumber<float> PatternIntensityFloorPercent { get; } =
+    // Shown for every 4/6/7K chart, RC or LN (see ChartClassification.
+    // PatternDifficulties). Names are the pattern analyzer's own names (Trills,
+    // Chordjacks, Inverse, ...), shown verbatim — no display renaming.
+    //
+    // Selection (2026-09-16): every pattern scores TimeShare x RelativeIntensity
+    // ("how much this pattern actually pushes the map's felt difficulty", not
+    // just how much time it covers — matches the local pattern-debug-viewer
+    // tool's ranking). The top score always shows; the 2nd/3rd only show if
+    // their score is at least this % of the top one, so 1-3 patterns show
+    // depending on how spread out the chart's patterns are.
+    [SettingSource("패턴 컷오프 비율 (%)")]
+    public BindableNumber<float> PatternCutoffPercent { get; } =
         new BindableFloat(50) { MinValue = 0, MaxValue = 100, Precision = 1 };
 
     [Resolved(canBeNull: true)]
@@ -58,11 +62,40 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
     [Resolved(canBeNull: true)]
     private IBindable<IReadOnlyList<Mod>>? mods { get; set; }
 
+    // Row 1 is the dan verdict (both RC and LN halves when the chart has
+    // both — no separate "primary only" line repeating one of them); row 2 is
+    // the pattern summary.
     private OsuSpriteText danLine = null!;
-    private OsuSpriteText detailLine = null!;
+    private OsuSpriteText row2Line = null!;
     private CancellationTokenSource? cts;
     private ModSettingChangeTracker? _modTracker;
     private ChartClassification? lastClassification;
+
+    // Temporary real-device debug bridge (2026-09-16): dumps the full,
+    // unfiltered PatternDifficulties list to a fixed local file every time a
+    // map is (re)classified, so the timeline-bar visualization site can be
+    // refreshed on request just by asking Claude to re-read this file — no
+    // in-game trigger, no server involved.
+    private static readonly string PatternDumpPath =
+        Path.Combine(Path.GetTempPath(), "lazersr_pattern_debug.json");
+
+    private sealed class PatternDumpEntry
+    {
+        public string Pattern { get; set; } = "";
+        public string SpecificType { get; set; } = "";
+        public double TimeShare { get; set; }
+        public double RelativeIntensity { get; set; }
+        public List<double[]> Intervals { get; set; } = new();
+    }
+
+    private sealed class PatternDump
+    {
+        public string Title { get; set; } = "";
+        public string Version { get; set; } = "";
+        public int KeyCount { get; set; }
+        public double DurationMs { get; set; }
+        public List<PatternDumpEntry> Patterns { get; set; } = new();
+    }
 
     public DanInfoWidget()
     {
@@ -85,12 +118,12 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
             {
                 Anchor = Anchor.Centre,
                 Origin = Anchor.Centre,
-                Y = -6,
+                Y = -9,
                 Font = OsuFont.Default.With(size: 15f, weight: FontWeight.SemiBold),
                 Text = "Dan Info",
                 Alpha = 0.6f,
             },
-            detailLine = new OsuSpriteText
+            row2Line = new OsuSpriteText
             {
                 Anchor = Anchor.Centre,
                 Origin = Anchor.Centre,
@@ -107,8 +140,7 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
 
         // Slider tweaks re-render the already-classified map instantly instead
         // of waiting for the next map/mod change to re-run the heavy classify.
-        PatternShareFloorPercent.BindValueChanged(_ => renderCurrent());
-        PatternIntensityFloorPercent.BindValueChanged(_ => renderCurrent());
+        PatternCutoffPercent.BindValueChanged(_ => renderCurrent());
 
         if (gameplayState != null)
         {
@@ -162,7 +194,7 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
                 else
                 {
                     if (wb == null) return;
-                    playable = wb.GetPlayableBeatmap(rs ?? wb.BeatmapInfo.Ruleset, Array.Empty<Mod>(), token);
+                    playable = wb.GetPlayableBeatmap(rs ?? wb.BeatmapInfo.Ruleset, mods?.Value ?? Array.Empty<Mod>(), token);
                 }
 
                 token.ThrowIfCancellationRequested();
@@ -187,6 +219,7 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
 
                 if (token.IsCancellationRequested) return;
 
+                dumpPatternDebug(classification, wb, playable);
                 publish(token, classification);
             }
             catch (OperationCanceledException) { }
@@ -195,6 +228,61 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
                 HookLog.Write($"[LazerSR] DanInfoWidget recalc failed: {e}");
             }
         }, token);
+    }
+
+    private static void dumpPatternDebug(ChartClassification? classification, WorkingBeatmap? wb, IBeatmap playable)
+    {
+        // HookLog.Write is a release no-op, so failures here are otherwise
+        // invisible — write a diagnostic payload to the same fixed path in
+        // every branch (null result, exception) instead of just bailing, so
+        // "why is the dump missing" is answerable from the file alone.
+        try
+        {
+            if (classification == null)
+            {
+                File.WriteAllText(PatternDumpPath, JsonSerializer.Serialize(new { note = "classification was null (unsupported ruleset/beatmap, or classify failed upstream)" }));
+                return;
+            }
+
+            if (classification.PatternDifficulties == null)
+            {
+                File.WriteAllText(PatternDumpPath, JsonSerializer.Serialize(new
+                {
+                    note = "PatternDifficulties was null (BuildPatternDifficulty returned null — see classification.Warnings)",
+                    keyCount = classification.KeyCount,
+                    supported = classification.Supported,
+                    warnings = classification.Warnings,
+                }));
+                return;
+            }
+
+            double duration = playable.HitObjects.Count > 0
+                ? playable.HitObjects.Max(h => h.GetEndTime())
+                : 0;
+
+            var dump = new PatternDump
+            {
+                Title = wb?.BeatmapInfo.Metadata.Title ?? "",
+                Version = wb?.BeatmapInfo.DifficultyName ?? "",
+                KeyCount = classification.KeyCount,
+                DurationMs = duration,
+                Patterns = classification.PatternDifficulties.Select(p => new PatternDumpEntry
+                {
+                    Pattern = p.Pattern,
+                    SpecificType = p.SpecificType,
+                    TimeShare = p.TimeShare,
+                    RelativeIntensity = p.RelativeIntensity,
+                    Intervals = p.Intervals.Select(iv => new[] { iv.Start, iv.End }).ToList(),
+                }).ToList(),
+            };
+
+            File.WriteAllText(PatternDumpPath, JsonSerializer.Serialize(dump));
+        }
+        catch (Exception e)
+        {
+            try { File.WriteAllText(PatternDumpPath, JsonSerializer.Serialize(new { note = "dump threw", error = e.ToString() })); }
+            catch { /* if we can't even write the error, nothing more we can do */ }
+        }
     }
 
     private void publish(CancellationToken token, ChartClassification? classification)
@@ -208,24 +296,27 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
     }
 
     // Re-renders lastClassification with the widget's current settings —
-    // called both after a fresh classify and when the axis-floor sliders move,
-    // so slider tweaks don't need a map re-select to take effect.
+    // called both after a fresh classify and when the cutoff slider moves, so
+    // a slider tweak doesn't need a map re-select to take effect.
     private void renderCurrent()
     {
-        var (main, detail) = lastClassification != null ? format(lastClassification) : (string.Empty, string.Empty);
+        var (main, row2) = lastClassification != null
+            ? format(lastClassification)
+            : (string.Empty, string.Empty);
 
         if (string.IsNullOrEmpty(main))
         {
             danLine.Text = "N/A";
-            detailLine.Text = string.Empty;
+            row2Line.Text = string.Empty;
             danLine.Alpha = 0.6f;
+            row2Line.Alpha = 0f;
             return;
         }
 
         danLine.Text = main;
-        detailLine.Text = detail;
+        row2Line.Text = row2;
         danLine.Alpha = 1f;
-        detailLine.Alpha = string.IsNullOrEmpty(detail) ? 0f : 0.85f;
+        row2Line.Alpha = string.IsNullOrEmpty(row2) ? 0f : 0.85f;
     }
 
     private static string encodeToOsu(IBeatmap beatmap)
@@ -235,50 +326,56 @@ public class DanInfoWidget : CompositeDrawable, ISerialisableDrawable
         return writer.ToString();
     }
 
-    private (string Main, string Detail) format(ChartClassification c)
+    private (string Main, string Row2) format(ChartClassification c)
     {
         var primary = c.Primary;
         if (!c.Supported || primary == null)
             return (string.Empty, string.Empty);
 
-        // Top line always tags RC (tap) vs LN so a 4K sub-10 verdict is not ambiguous.
-        // The vibro warning here is unchanged from before — it always wins over
-        // the axis summary below, which is skipped entirely on a vibro chart.
-        string sideTag = primary.Kind == "ln" ? "LN" : "RC";
-        string main = $"{sideTag}  {half(primary)}{(c.Vibro ? "  ⚠VIBRO" : "")}";
+        // Row 1: both halves whenever both exist — no separate "primary only"
+        // line repeating one of them (that was pure duplication when the two
+        // differed, and equally redundant when they happened to match).
+        string main = c.Rc != null && c.Ln != null
+            ? $"RC {half(c.Rc)}  LN {half(c.Ln)}"
+            : $"{(primary.Kind == "ln" ? "LN" : "RC")}  {half(primary)}";
 
-        // Second line: top named patterns (LeoBlack pattern types joined against
-        // Roxy's difficulty curve) when this chart's verdict actually came from
-        // Roxy (4K RC only — see RoxyPatterns). Falls back to the RC/LN hybrid
-        // detail when Roxy didn't run or nothing clears the floors.
-        string? patternSummary = c.Vibro ? null : buildPatternSummary(c.RoxyPatterns);
-        string detail;
-        if (patternSummary != null)
-            detail = patternSummary;
-        else if (c.Rc != null && c.Ln != null && half(c.Rc) != half(c.Ln))
-            detail = $"RC {half(c.Rc)}  ·  LN {half(c.Ln)}";
-        else
-            detail = string.Empty;
+        // Row 2: VIBRO warning has the row to itself when it fires (the
+        // pattern summary is always empty on a vibro chart anyway, so there's
+        // nothing it would be crowding out). Otherwise the top named patterns
+        // joined against the per-map difficulty curve (see ChartClassification.
+        // PatternDifficulties) — every 4/6/7K chart, RC or LN.
+        string row2 = c.Vibro ? "⚠VIBRO" : (buildPatternSummary(c.PatternDifficulties) ?? string.Empty);
 
-        return (main, detail);
+        return (main, row2);
     }
 
-    // Top 3 patterns by time share, excluding any pattern whose time share or
-    // relative intensity (vs. this chart's own hardest moment) doesn't clear
-    // the sliders' floors. Names are shown verbatim (LeoBlack's own naming).
-    private string? buildPatternSummary(List<RoxyPatternDifficulty>? patterns)
+    // Ranks every pattern by TimeShare x RelativeIntensity — "how much this
+    // pattern actually pushes the map's felt difficulty", not just how much
+    // time it covers (same ranking as the local pattern-debug-viewer tool).
+    // The top score always shows; #2/#3 only show if their score is at least
+    // PatternCutoffPercent of the top score, so 1-3 patterns show depending on
+    // how spread out the chart's patterns are. The % shown is still the plain
+    // TimeShare, not the score. Names are shown verbatim (the pattern
+    // analyzer's own naming).
+    private string? buildPatternSummary(List<ChartPatternDifficulty>? patterns)
     {
         if (patterns == null || patterns.Count == 0) return null;
 
-        double shareFloor = PatternShareFloorPercent.Value / 100.0;
-        double intensityFloor = PatternIntensityFloorPercent.Value / 100.0;
-
-        var picked = patterns
-            .Where(p => p.TimeShare > shareFloor && p.RelativeIntensity >= intensityFloor)
-            .OrderByDescending(p => p.TimeShare)
-            .Take(3)
-            .Select(p => p.SpecificType)
+        var scored = patterns
+            .Select(p => (Pattern: p, Score: p.TimeShare * p.RelativeIntensity))
+            .OrderByDescending(x => x.Score)
             .ToList();
+
+        double cutoff = scored[0].Score * (PatternCutoffPercent.Value / 100.0);
+
+        var picked = new List<string>();
+        for (int i = 0; i < scored.Count && picked.Count < 3; i += 1)
+        {
+            // Sorted descending, so once one entry falls below the cutoff every
+            // remaining one does too.
+            if (i > 0 && scored[i].Score < cutoff) break;
+            picked.Add($"{scored[i].Pattern.SpecificType} {Math.Round(scored[i].Pattern.TimeShare * 100):0}%");
+        }
 
         return picked.Count > 0 ? string.Join("  ·  ", picked) : null;
     }

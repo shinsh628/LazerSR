@@ -1096,55 +1096,67 @@ within-1-tier 100%. <4★에서 발산(원인: `chart-classifier`의 `sunnyLowEn
   4K RC 저단(<9★)에서만 MSD(MinaCalc)+InterludeSR+ONNX가 실제로 돌고, 6/7K·≥9★·LN-main은
   `CompanellaPending`이 false라 sync 결과를 그대로 반환(추가 비용 없음). 전부 `Task.Run` + CTS 안이라
   UI를 막지 않고 다음 호버에서 취소된다.
-- 표시: **윗줄 = `{RC|LN}  {primary half DisplayName}` + tier variant(`--`~`++`) + 경계(`< `/`> `)
-  + vibro 마크.** RC/LN 태그는 4K 10단 이하에서 단놋/롱놋 dan 구분이 안 되던 문제로 추가(2026-09-10).
-  하이브리드면 둘째 줄에 RC·LN 두 half — 단, 아래 Roxy 축 요약이 있으면 그게 둘째 줄을 대신한다.
+- 표시(2026-09-16, 3줄 구조로 확장): **1줄 = `{RC|LN}  {primary half DisplayName}` + tier variant
+  (`--`~`++`) + 경계(`< `/`> `) + vibro 마크.** RC/LN 태그는 4K 10단 이하에서 단놋/롱놋 dan 구분이 안
+  되던 문제로 추가(2026-09-10). **2줄 = RC/LN 하이브리드 detail**(두 half가 다를 때만). **3줄 = 패턴
+  요약**(아래 설명). 2줄이 비어 있으면 3줄 내용이 2줄 자리로 올라오고 3줄은 빈 채로 남는다 — 위젯은
+  항상 3줄 높이를 갖지만 실제로 뜨는 건 최대 2줄.
 - `mania`가 아니면 `N/A`.
 
-**Roxy 패턴 요약(2026-09-15, v7.2.0으로 7축 방식을 대체)** — 둘째 줄, vibro 아닌 4K RC이고 **Roxy가
-실제로 라우팅을 이긴 경우에만**(`mixed.NumericDifficultyHint == "roxy-meta-ridge-v3"` — Mixed 라우팅상
-Roxy는 고난이도만 맡고 저난이도 4K RC는 Azusa가 대신 계산하므로 전체 4K RC 중 일부에서만 뜸) 패턴 이름
-상위 3개를 표시(LeoBlack 원문 그대로, 리네임 없음 — 예: Trills, Chordjacks, Jumpstream).
+**패턴 요약(2026-09-16, 4/6/7K RC·LN 전체로 확장 — v7.2.0의 "4K RC만" 범위를 대체)** — 3번째 줄
+(비어있으면 2번째 줄), vibro가 아닌 모든 4/6/7K 맵에서 상위 3개 패턴을 `이름 n%` 형식으로 표시
+(LeoBlack 원문 이름 그대로 — 예: `Trills 45%  ·  Handstream 30%  ·  Minijack 15%`).
 
-- **7축 방식 폐기 이유**: v7.1.0~v7.1.1에서 Roxy의 7축(speed/handStream/jack/chordjack/tech/stamina/
-  course) 자체를 서로 비교해 표시했었다. 리서치 결과 mania-hub도, Roxy 원저작자(LeoBlackMT) 본인도 이
-  7축을 사용자에게 노출한 적이 없고, 원저작자의 유일한 시도(`RoxyHandSplitTech`)조차 "과적합이라 폐기"
-  꼬리표를 달고 디버그 아카이브에 묻혀 있었다(`docs/roxy_algorithm.md`, 로컬 `LeoBlackMT-osumania_map_
-  analyser` 클론 확인). 축 이름도 Rolls/Trills/Jumpstream 같은 실제 패턴 어휘와 무관한 내부 계산 채널
-  이름이라 사용자에게 의미 있는 표시가 아니었음.
-- **새 산출 방식 — 두 개의 독립 파이프라인을 시간으로 이어붙임**:
-  1. **패턴 위치**: `LazerSR.DanCalculator\Patterns\FindPatterns.cs`가 만드는 원시 매치 리스트
-     (`FoundPattern` — Pattern/SpecificType/Start/End, 클러스터링으로 뭉개지기 전 단계)를
-     `PatternService.FindPatternWindows(osuText)`로 그대로 노출. RC 스코프이므로 Stream/Chordstream/
-     Jacks 코어만 사용(Coordination/Density/Wildcard는 LN 전용이라 제외).
-  2. **구간별 난이도**: `RoxyEstimator.ComputeSectionAggregate`가 내부적으로 이미 만드는 400ms 구간별
+- **이전 판(v7.1.0~v7.2.0) 대비 바뀐 점**:
+  - 7축(speed/handStream/...) 비교 방식은 mania-hub도 Roxy 원저작자도 사용자에게 노출한 적이 없다는
+    걸 확인하고 폐기(`docs/roxy_algorithm.md`, 로컬 `LeoBlackMT-osumania_map_analyser` 클론 확인).
+  - "Roxy가 라우팅을 이겼을 때만" 게이트하던 것도 폐기 — 이제 **패턴 분류 자체는 항상 패턴분석기
+    네이티브 출력**(`PatternService.AnalyzePatternFromText`의 `Report.Clusters` — RC/LN/HB/Mix
+    모드택·키수별 테이블을 분석기가 전부 알아서 처리, 우리가 RC만 골라내는 수동 필터 없음)을 쓰고,
+    **난이도 시계열만 4K는 Roxy, 그 외(6/7K 전부 + Roxy가 안 되는 4K)는 Sunny 바닐라 strain**으로
+    분기한다. 목표는 모든 4/6/7K 맵에서 패턴 요약이 뜨는 것.
+- **산출 방식**:
+  1. **패턴+시간위치**: `Report.Clusters`(각 클러스터가 이미 `Intervals`(원시 매치 구간 리스트)를
+     들고 있음 — `Clustering.cs`의 `LeoBlackPatternCluster.Intervals` 필드, 2026-09-16 추가) 그대로 사용.
+  2. **난이도 시계열 — 4K**: `RoxyEstimator.ComputeSectionAggregate`가 내부적으로 만드는 400ms 구간별
      최댓값(`sectionMax`, 최종 스칼라로 접기 직전 단계)을 `BuildSectionCurve`로 추출해
-     `Debug["sectionCurve"]`에 실음. 계산 로직 자체는 미변경(순수 추출).
-  3. **시간축 합치기**: 패턴 쪽은 원본 `.osu` 시각을 그대로 쓰지만, Roxy는 분석 전에
-     `CanonicalizeOsuTiming`으로 시간축을 재배치(첫 노트를 1000ms로 이동 + 배속 스케일)한다. 이미
-     `Debug["speedRateMode"]`에 있는 `originalFirstObjectMs`/`analysisSpeedRate`/
-     `canonicalFirstObjectMs`로 역변환해서 원본 시각으로 되돌린 뒤 겹쳐본다
-     (`ChartClassifier.BuildRoxyPatternDifficulty`).
-  4. **집계**: 패턴 타입별로 겹치는 시간구간을 합집합해 `TimeShare`(맵 전체 대비 시간비율)를 구하고,
-     그 구간에 겹치는 400ms 구간값들의 (구간 길이 가중) 평균을 그 맵 자체의 피크 구간값으로 나눠
-     `RelativeIntensity`(0~1, "이 맵의 가장 어려운 순간 대비 몇 %인가")를 구한다 — **다른 맵과 비교하는
-     값이 아니라 같은 맵 안에서만 비교**하므로 7축 방식이 겪었던 스케일 불일치 문제가 구조적으로 없다.
-     Roxy 자체 분석 범위 이전(짧은 인트로 등)이라 겹치는 구간이 없는 윈도우는 0으로 세지 않고 평균에서
-     제외.
+     `Debug["sectionCurve"]`에 싣는다. **최종 dan 라우팅 승패와 무관하게** — Mixed가 최종 verdict로
+     Azusa를 채택했어도 이 값은 별도로(Roxy를 독자적으로 한 번 더 호출해서) 얻는다
+     (`ChartClassifier.TryBuildRoxyCurve`). Roxy 자체 하드 게이트(LN≤18%, 탭≥80)는 그대로 유효 —
+     이걸 못 넘으면 Sunny로 폴백.
+  3. **난이도 시계열 — 그 외(6/7K, Roxy 불가 4K)**: `SunnyShim.Run(osuText, rate, withGraph:true)`의
+     `.Graph`(오브젝트별 순수 strain 타임라인 — **`StrainAreaGraph` 위젯이 쓰는 후가공(최댓값 정규화 +
+     감마보정 + 300포인트 리샘플) 버전이 아니라 바닐라 원본**)를 씀
+     (`ChartClassifier.TryBuildSunnyCurve`). Sunny는 시간축 재배치가 없어 역변환 불필요.
+  4. **시간축 합치기(Roxy만 해당)**: Roxy는 분석 전 `CanonicalizeOsuTiming`으로 시간축을 재배치(첫
+     노트를 1000ms로 이동 + 배속 스케일)한다. `Debug["speedRateMode"]`의
+     `originalFirstObjectMs`/`analysisSpeedRate`/`canonicalFirstObjectMs`로 역변환해서 패턴 쪽
+     (원본 `.osu` 시각 그대로 사용)과 시간축을 맞춘다.
+  5. **코어 패턴별 중복 병합**: 가지치기된 `Report.Clusters`는 같은 코어 패턴(Stream/Chordstream/...)이
+     BPM 대역별로 최대 3개까지 따로 남아있을 수 있어, 같은 이름이 상위 3개 안에 중복으로 뜨는 문제가
+     실측에서 나왔다. 원저작자 앱의 자체 `mergeDuplicateClusters`(`display.js`, 코어 패턴별로 합치고
+     세부타입 비율은 각 클러스터의 Amount로 가중평균)와 동일한 방식을 그대로 적용
+     (`ChartClassifier.BuildPatternDifficulty` 내 `GroupBy(cl => cl.Pattern)`).
+  6. **시간비율(`TimeShare`) — `LeoBlackPatternCluster.Amount`를 쓰지 않는다**: `Amount`를 만드는
+     `Clustering.PatternAmount`(mania-hub/LeoBlack 원본 포팅 코드)에 **겹치는 구간을 병합하지 않고
+     중복으로 누적하는 버그**가 있음을 실측으로 발견했다(`Chordjack 178%`처럼 100% 넘는 값이 실제로
+     나옴). `FindPatterns`가 한 행씩 미는 슬라이딩 스캔이라 같은 패턴이 길게 이어지면 거의 겹치는
+     윈도우 수백 개가 나오는데, 이 함수가 그 겹침을 곧이곧대로 다 더해버려서 실제 시간의 몇 배로
+     부풀려진다. `PatternAmount` 자체는 `Categorise`/`Importance` 등 다른 기능이 의존하고 있어 손대지
+     않고, `TimeShare`만 `ChartClassifier.UnionMs`(올바른 구간 합집합, `cluster.Intervals`에서 직접
+     재계산)로 대체 — 40개 맵 179개 패턴 항목 재검증, 100% 초과 0건(최댓값 76.4%).
+  7. **강도(`RelativeIntensity`)**: 각 패턴 구간에 겹치는 난이도 시계열 값들의 (구간 길이 가중) 평균을
+     그 맵 자체의 피크 값으로 나눈 0~1 값 — **다른 맵과 비교하는 값이 아니라 같은 맵 안에서만
+     비교**하므로 예전 7축 방식이 겪었던 스케일 불일치 문제가 구조적으로 없다. 난이도 시계열의 분석
+     범위 밖(짧은 인트로 등)이라 겹치는 구간이 없는 윈도우는 0으로 세지 않고 평균에서 제외.
 - **최소컷(위젯 세부설정 슬라이더)**: `PatternShareFloorPercent`(기본 5%)와
   `PatternIntensityFloorPercent`(기본 50%) 둘 다 통과한 패턴만 후보, 시간비율 내림차순 상위 3개.
-- 실측 검증(`dev\OsuScoreModel` 무작위 4K 샘플, Roxy 적중 맵 10개 육안 확인): 맵마다 서로 다른 패턴
-  조합이 자연스럽게 뜸 — 예: "Chordstream · Handstream · Jumpstream", "Longjacks · Chordjacks",
-  "Stream · Minitrills · Rolls" 등. 7축 방식과 달리 특정 항목이 항상 독점하는 현상 없음.
-- **최소컷(위젯 세부설정 슬라이더로 조정 가능)**: `RoxyAxisRawFloor`(기본 2, LocalRawDan 미만이면 제외)
-  와 `RoxyAxisShareFloorPercent`(기본 5%, Share 이하면 제외) 둘 다 통과한 축만 후보. 통과한 것 중 비중
-  상위 3개.
-- **Sunny 저단 리라우트와의 상호작용**: `SunnyLowEndReroute`가 걸리면 `mixed`는 Sunny 값으로 교체되지만
-  `ChartClassifier.Clone()`이 `ActualEstimatorAlgorithm`/`Debug`를 원래 Roxy 결과에서 그대로 복사해오므로,
-  `NumericDifficultyHint`만으로 게이트해야 한다(리라우트 시 `null`로 초기화됨) — `ActualEstimatorAlgorithm`
-  단독 체크는 stale한 "Roxy" 값에 속아 리라우트된 차트에서도 축 요약을 잘못 띄운다.
-- 6K/7K, 4K LN-primary, Roxy 미채택 4K RC(Azusa 경로)는 전부 `RoxyAxes == null` — 기존 그대로 dan
-  텍스트만 표시.
+- 관련 타입: `ChartClassification.PatternDifficulties`(구 `RoxyPatterns`/`RoxyAxes` — 둘 다 제거됨),
+  `ChartPatternDifficulty { Pattern, SpecificType, TimeShare, RelativeIntensity }`.
+- 실측 검증: 4K 샘플로 직접 `ChartClassifier.ClassifyChart` 호출 — RC/LN 패턴이 자연스럽게 섞여 나옴
+  (예: Jacky WC/Shield/Release 같은 LN 패턴도 이제 뜸), 중복 제거 확인, TimeShare 100% 초과 없음 확인.
+  **6/7K 실측은 아직 못 함** — 로컬 코퍼스(`dev\OsuScoreModel`)가 순수 4K 전용이라 Sunny 폴백 경로는
+  데이터 소스 자체만 검증(오름차순 시각·정상 값 범위)하고 전체 파이프라인은 6/7K 실제 맵으로 미검증.
 
 ### 결과창 dan 행 (`Drawables\DanResultRow.cs`, 2026-09-10 신규)
 

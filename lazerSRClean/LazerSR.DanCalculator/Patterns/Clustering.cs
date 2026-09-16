@@ -17,6 +17,12 @@ public sealed class LeoBlackPatternCluster : ILeoBlackVibroCluster
     public double BPM { get; set; }
     public bool Mixed { get; set; }
     public double Amount { get; set; }
+    /// <summary>The raw (pre-union, possibly overlapping) match windows this
+    /// cluster was built from — Start/End in the same time units as the parsed
+    /// chart (unscaled .osu note times). Not used by Amount's own union-based
+    /// coverage calc; exposed so callers can join this cluster's occurrences
+    /// against an external time-series (e.g. a difficulty-over-time curve).</summary>
+    public List<(double Start, double End)> Intervals { get; set; } = new();
 
     public double Importance => Amount * RatingMultiplier * BPM;
 
@@ -218,6 +224,7 @@ public static class Clustering
                 BPM = group.Bpm,
                 Mixed = group.Mixed,
                 Amount = amount,
+                Intervals = startsEnds,
             });
         }
 

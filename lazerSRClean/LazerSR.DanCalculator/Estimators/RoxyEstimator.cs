@@ -216,8 +216,26 @@ public static class RoxyEstimator
     // routes to Azusa (low difficulty) / other handling (high difficulty).
     private static RcEstimatorResult BuildScopeResult(
         string label, string code, double structuralNumeric, double rawNumeric,
-        double? lnRatio, double? columnCount, object? notes, object? rows)
-        => new()
+        double? lnRatio, double? columnCount, object? notes, object? rows,
+        List<Dictionary<string, object?>>? sectionCurve = null,
+        Dictionary<string, object?>? speedRateMode = null)
+    {
+        var debug = new Dictionary<string, object?>
+        {
+            ["code"] = code,
+            ["message"] = $"Roxy RC scope {label} (structural {structuralNumeric.ToString("F2", CultureInfo.InvariantCulture)})",
+            ["structuralNumeric"] = Fmt4(structuralNumeric),
+            ["notes"] = notes,
+            ["rows"] = rows,
+        };
+        // The dan-info widget's pattern-vs-difficulty overlay wants Roxy's
+        // structural section curve regardless of where the FINAL numeric lands
+        // (BelowScope/AboveScope still ran the full structural pass — only the
+        // meta-calibrated headline number is out of Roxy's labelled range).
+        if (sectionCurve != null) debug["sectionCurve"] = sectionCurve;
+        if (speedRateMode != null) debug["speedRateMode"] = speedRateMode;
+
+        return new RcEstimatorResult
         {
             Star = Math.Round(3.4 + 0.38 * structuralNumeric, 4, MidpointRounding.AwayFromZero),
             LnRatio = IsFin(lnRatio) ? lnRatio!.Value : 0,
@@ -229,15 +247,9 @@ public static class RoxyEstimator
             RawNumericDifficulty = double.IsFinite(rawNumeric)
                 ? Math.Round(rawNumeric, 4, MidpointRounding.AwayFromZero)
                 : null,
-            Debug = new Dictionary<string, object?>
-            {
-                ["code"] = code,
-                ["message"] = $"Roxy RC scope {label} (structural {structuralNumeric.ToString("F2", CultureInfo.InvariantCulture)})",
-                ["structuralNumeric"] = Fmt4(structuralNumeric),
-                ["notes"] = notes,
-                ["rows"] = rows,
-            },
+            Debug = debug,
         };
+    }
 
     private static string NumericToRoxyRcLabel(double numeric)
     {
@@ -1310,69 +1322,6 @@ public static class RoxyEstimator
         };
     }
 
-    // Empirically measured 2026-09-15 median per-axis weighted contribution
-    // (StreamWeights[s] * StreamSummaries[s].Aggregate) across 418 Roxy-routed
-    // 4K RC charts (random OsuScoreModel sample, 9000 4K files scanned). Needed
-    // because the 7 axes' raw accumulator scales are NOT comparable directly —
-    // stamina/course decay on 10-170x longer time constants than the other 5
-    // axes (StreamBurstTau/StreamStaminaTau above), so their raw magnitude
-    // structurally dominates any unnormalized share regardless of the chart's
-    // actual content (measured: naive share averaged 0.51/0.46 stamina/course,
-    // the other 5 axes combined under 0.04, and every single sampled chart's
-    // top axis was one of those two). A pure tau-ratio correction was tried
-    // first and failed harder (stamina alone won 418/418 — a second, nested
-    // decay accumulator inside staminaIn's own formula adds scale the outer
-    // tau ratio doesn't account for). Dividing each axis's contribution by its
-    // own corpus-typical scale before comparing axes is what actually produced
-    // a balanced spread (avg share 0.07-0.20 across all 7, top axis varying by
-    // chart). Order matches StreamNames: speed, handStream, jack, chordjack,
-    // tech, stamina, course.
-    private static readonly double[] AxisShareReference =
-        { 18.009, 18.614, 12.225, 3.061, 10.590, 1658.498, 3742.702 };
-
-    // Per-axis (StreamNames) share of the primary raw structural signal — see
-    // AxisShareReference above for why raw contributions are normalized before
-    // comparing — plus an approximate "as-if this axis alone were the whole
-    // chart" raw-dan-equivalent (on the real calibrated scale, NOT normalized),
-    // computed by running that axis's own raw weighted contribution through the
-    // SAME log compression / linear map / isotonic knots the composite signal
-    // uses. Corrections and the meta-ridge model are NOT applied here — those
-    // are whole-chart context (OD, reference-gap, marathon...) that has no
-    // per-axis meaning — so this is a rough display-only ranking signal, not a
-    // real per-axis dan verdict. Consumed by ChartClassifier only when this
-    // Roxy result actually wins the routing (numericDifficultyHint ==
-    // "roxy-meta-ridge-v3"), for the dan-info widget's pattern-axis summary.
-    private static Dictionary<string, object?> BuildAxisBreakdown(RoxyCurve curve)
-    {
-        var contribs = new double[StreamNames.Length];
-        var normalized = new double[StreamNames.Length];
-        double normalizedTotal = 0;
-        for (int s = 0; s < StreamNames.Length; s += 1)
-        {
-            double aggregate = curve.StreamSummaries.TryGetValue(StreamNames[s], out var summary) ? summary.Aggregate : 0;
-            double contrib = Math.Max(0, StreamWeights[s] * aggregate);
-            contribs[s] = contrib;
-            double n = AxisShareReference[s] > 0 ? contrib / AxisShareReference[s] : 0;
-            normalized[s] = n;
-            normalizedTotal += n;
-        }
-
-        var result = new Dictionary<string, object?>();
-        for (int s = 0; s < StreamNames.Length; s += 1)
-        {
-            double share = normalizedTotal > 0 ? normalized[s] / normalizedTotal : 0;
-            double logRaw = Math.Log(1 + contribs[s]);
-            double preNumeric = Clamp(LinearMap(logRaw, CfgRawMapP02, CfgRawMapP98, -2, 20), -2.5, 21);
-            double localRawDan = Clamp(PiecewiseLinear(preNumeric, IsotonicKnots), -2, 20);
-            result[StreamNames[s]] = new Dictionary<string, object?>
-            {
-                ["share"] = Fmt4(share),
-                ["localRawDan"] = Fmt4(localRawDan),
-            };
-        }
-        return result;
-    }
-
     private static RoxyCorrections ComputeCorrections(RoxyStats stats)
     {
         double lowCj = 0.75
@@ -2052,8 +2001,20 @@ public static class RoxyEstimator
             ComputeNpsRows(rows, tapTimes);
             var activity = ComputeActivityStats(rows, taps.Count);
             var curve = ComputeRoxyCurve(rows, taps, activity);
-            var axisBreakdown = BuildAxisBreakdown(curve);
             var sectionCurve = BuildSectionCurve(rows, curve.LocalRaw);
+            // Shared with BuildScopeResult below (BelowScope/AboveScope still ran
+            // the full structural pass) and with the final success Debug block —
+            // computed once so both stay in sync with the same reverse-time-map
+            // inputs the dan-info widget needs to undo CanonicalizeOsuTiming.
+            var speedRateModeDebug = new Dictionary<string, object?>
+            {
+                ["mode"] = "time-scale-only",
+                ["speedRate"] = Fmt4(speedRate),
+                ["analysisSpeedRate"] = Fmt4(analysisSpeedRate),
+                ["canonicalFirstObjectMs"] = RoxyCanonicalFirstObjectMs,
+                ["originalFirstObjectMs"] = Fmt4(timing.FirstTime),
+                ["canonicalized"] = timing.Applied,
+            };
             var numericDetails = ComputeRoxyNumeric(curve);
             double structuralNumeric = Math.Round(numericDetails.Numeric, 2, MidpointRounding.AwayFromZero);
 
@@ -2146,12 +2107,12 @@ public static class RoxyEstimator
             if (finalNumeric < RoxyScopeMin)
             {
                 return BuildScopeResult(RoxyScopeMinLabel, "BelowScope", finalNumeric, numericDetails.RawNumeric,
-                    lnRatio, columnCount, taps.Count, rows.Count);
+                    lnRatio, columnCount, taps.Count, rows.Count, sectionCurve, speedRateModeDebug);
             }
             if (finalNumeric >= RoxyScopeMax)
             {
                 return BuildScopeResult(RoxyScopeMaxLabel, "AboveScope", finalNumeric, numericDetails.RawNumeric,
-                    lnRatio, columnCount, taps.Count, rows.Count);
+                    lnRatio, columnCount, taps.Count, rows.Count, sectionCurve, speedRateModeDebug);
             }
 
             string estDiff = NumericToRoxyRcLabel(finalNumeric);
@@ -2223,15 +2184,7 @@ public static class RoxyEstimator
                     },
                     ["referenceGapCorrection"] = Fmt4(referenceGapCorrection),
                     ["azusaHighGapLift"] = Fmt4(azusaHighGapLift),
-                    ["speedRateMode"] = new Dictionary<string, object?>
-                    {
-                        ["mode"] = "time-scale-only",
-                        ["speedRate"] = Fmt4(speedRate),
-                        ["analysisSpeedRate"] = Fmt4(analysisSpeedRate),
-                        ["canonicalFirstObjectMs"] = RoxyCanonicalFirstObjectMs,
-                        ["originalFirstObjectMs"] = Fmt4(timing.FirstTime),
-                        ["canonicalized"] = timing.Applied,
-                    },
+                    ["speedRateMode"] = speedRateModeDebug,
                     ["meta"] = new Dictionary<string, object?>
                     {
                         ["featureCount"] = RoxyMetaModel.ROXY_META_FEATURE_NAMES.Length,
@@ -2240,7 +2193,6 @@ public static class RoxyEstimator
                     ["stats"] = curve.Stats.ToDebugDict(),
                     ["corrections"] = numericDetails.Corrections.ToDebugDict(),
                     ["streams"] = streamsDebug,
-                    ["axisBreakdown"] = axisBreakdown,
                     ["sectionCurve"] = sectionCurve,
                 },
             };
