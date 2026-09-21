@@ -77,11 +77,18 @@ public partial class MainWindow : Window
         string hookDll = Path.Combine(AppContext.BaseDirectory, "LazerSR.Hook.dll");
         if (!File.Exists(hookDll)) { StatusTextBlock.Text = $"LazerSR.Hook.dll not found in {AppContext.BaseDirectory}"; return; }
 
-        var psi = new ProcessStartInfo(exePath)
+        // osu! 2026.920.0+ ships with startup hooks disabled, so osu!.exe itself would ignore DOTNET_STARTUP_HOOKS.
+        // Our host starts osu!'s own osu!.dll through osu!'s own runtime with that switch re-enabled (architecture.md §1).
+        string hostExe = Path.Combine(AppContext.BaseDirectory, "osuhost", "osu!.exe");
+        if (!File.Exists(hostExe)) { StatusTextBlock.Text = $"osu! host not found: {hostExe}"; return; }
+
+        string osuDir = Path.GetDirectoryName(exePath)!;
+        var psi = new ProcessStartInfo(hostExe)
         {
             UseShellExecute = false,
-            WorkingDirectory = Path.GetDirectoryName(exePath)!,
+            WorkingDirectory = osuDir,
         };
+        psi.ArgumentList.Add(osuDir);
         psi.Environment["DOTNET_STARTUP_HOOKS"] = hookDll;
         psi.Environment["OSU_EXTERNAL_UPDATE_PROVIDER"] = "1";
         psi.Environment["OSU_DISABLE_ERROR_REPORTING"] = "1";

@@ -12,7 +12,7 @@
 | `backup\1.1-strategy-a-original\` | 1.1 pill의 in-place reflection 방식 원본 코드 | 보존 |
 | `backup\sunny-v2-removed-2026-05-16\` | lazerSRClean 시작 시 폐기된 구 `LazerSR\` v2 시도(Dan/Graph/MSD/스킨위젯/클론) | 보존 |
 | `LazerSR\` | 기능 테스트 참고 환경 — lazerSRClean과 별개로 유지되는 실험용 프로젝트 | 보존 |
-| `osu\` | osu!lazer 소스 (ppy-osu-1164870 기준, 2026-07-17 갱신) — 컴파일타임 `ProjectReference` 대상 | **삭제금지** |
+| `osu\` | osu!lazer 소스 (2026.920.0-lazer, ppy-osu-ebaf7e9, 2026-09-21 갱신 — net10.0, .NET 10 SDK 필요) — 컴파일타임 `ProjectReference` 대상 | **삭제금지** |
 | `sunnyosu\` | sunny 리워크 mania 계산기 원본 fork — 이식은 이미 끝나서 **현재 어떤 `.csproj`도 참조 안 함**(2026-08-19 grep으로 확인, `sunnyosu\`가 없어도 빌드 됨). 과거 이식 근거 자료로 보존 | 보존 |
 | `enissayosu\` | 용도 미상 — `.csproj`/`.cs`/`.iss` 어디서도 참조 안 됨(2026-08-19 확인). git에는 안 올라감(`.gitignore`) | 확인 필요 |
 | `minacalc\` | MinaCalc 원본(Rust) clone — 실제 쓰는 건 `LazerSR.Hook\MinaCalc.dll`(사전 컴파일된 바이너리)뿐, 이 소스는 빌드에 안 쓰임. git에는 안 올라감(`.gitignore`) | 보존 (미사용) |
@@ -40,7 +40,8 @@
 | `progress\` | 날짜별 작업 일지 (`YYYY-MM-DD.md`) — 실제 작업의 유일한 확정 기록 | **관리대상**, 계속 추가됨 |
 | `installer\LazerSRClean.iss` | Inno Setup 스크립트, `AppId` 고정, 버전은 여기서 관리 | 관리대상 |
 | `installer\output\` | 컴파일된 `LazerSR-v{version}-Setup.exe` | 재생성 가능 (커밋 대상 아님) |
-| `LazerSR.Hook\` | osu! 프로세스에 주입되는 Class Library (net8.0) | **관리대상** |
+| `LazerSR.Hook\` | osu! 프로세스에 주입되는 Class Library (net10.0) | **관리대상** |
+| `LazerSR.OsuHost\` | 네이티브 osu! 호스트(C) — osu!.exe 대신 osu!.dll을 startup hook 허용 상태로 띄움. `build.cmd`(MSVC)를 런처 빌드가 호출, 산출물 `bin\osu!.exe` → 배포 `osuhost\osu!.exe`. `architecture.md` §1 | **관리대상** (2026-09-21 신규) |
 | `LazerSR.Hook\Patches\` | HarmonyX 패치 클래스들 — 목록은 `architecture.md` §4 | 관리대상 |
 | `LazerSR.Hook\Calculators\` | sunnySR/MSD/replay-timeline/결과창 구간 분석(`ManiaSectionAnalysis`)/패턴 BPM 등 계산 로직. **dan은 여기 없다** — `LazerSR.DanCalculator` 프로젝트로 이동(구 `DanCalculator.cs` sunny→임계 방식 폐기, 2026-09-10) | 관리대상 |
 | `LazerSR.Hook\Screens\` | 무한 트레이닝 화면/시드 비트맵 + 결과창 구간 연습(`SectionPractice*`) + **패턴 복제 화면/시드 비트맵(`PatternCopy*`)** — 전부 `OsuScreen`/`Player`/`WorkingBeatmap` 파생. 로컬 전용 로더 마커 `ILocalOnlyPlayerLoader` 포함 | 관리대상 |

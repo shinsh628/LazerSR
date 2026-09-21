@@ -33,7 +33,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
 
       - name: Resolve version
         id: version
@@ -57,7 +57,7 @@ jobs:
         shell: pwsh
         run: |
           $issPath = "lazerSRClean\installer\LazerSRClean.iss"
-          $publishDir = Join-Path $env:GITHUB_WORKSPACE "lazerSRClean\LazerSR.Launcher\bin\Release\net8.0-windows\win-x64\publish"
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE "lazerSRClean\LazerSR.Launcher\bin\Release\net10.0-windows\win-x64\publish"
           $outputDir = Join-Path $env:GITHUB_WORKSPACE "lazerSRClean\installer\output"
 
           $content = Get-Content $issPath -Raw

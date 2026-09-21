@@ -1,7 +1,7 @@
 #define MyAppName "LazerSR"
 #define MyAppVersion "7.3.0"
 #define MyAppExeName "LazerSR.Launcher.exe"
-#define MyPublishDir "C:\dev\lazerSR\lazerSRClean\LazerSR.Launcher\bin\Release\net8.0-windows\win-x64\publish"
+#define MyPublishDir "C:\dev\lazerSR\lazerSRClean\LazerSR.Launcher\bin\Release\net10.0-windows\win-x64\publish"
 
 [Setup]
 ; AppId는 기존 LazerSR과 동일 — 업그레이드로 인식되려면 반드시 같아야 함
@@ -37,8 +37,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "바탕화면에 바로 가기 만들기"; GroupDescription: "추가 작업:"
 
 [Files]
-; 메인 실행 파일 (SingleFile 번들, .NET 8 런타임 포함)
+; 메인 실행 파일 (SingleFile 번들, .NET 10 런타임 포함)
 Source: "{#MyPublishDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+
+; osu! 호스트 (네이티브) — osu!.exe 대신 osu!의 osu!.dll을 startup hook 허용 상태로 띄운다 (architecture.md §1)
+Source: "{#MyPublishDir}\osuhost\osu!.exe"; DestDir: "{app}\osuhost"; Flags: ignoreversion
 
 ; Hook DLL — DOTNET_STARTUP_HOOKS 실제 파일 경로 필요 (번들 외부 필수)
 Source: "{#MyPublishDir}\LazerSR.Hook.dll"; DestDir: "{app}"; Flags: ignoreversion

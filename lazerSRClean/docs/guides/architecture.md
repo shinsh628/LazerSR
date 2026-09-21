@@ -6,9 +6,50 @@ LazerSR is a non-invasive instrumentation layer for osu!lazer. It injects a mana
 
 ---
 
-## 1. Injection (`DOTNET_STARTUP_HOOKS`)
+## 1. Injection (`DOTNET_STARTUP_HOOKS` + osu! 호스트, 2026-09-21 개편)
 
-Launcher가 osu! 자식 프로세스에만 `DOTNET_STARTUP_HOOKS=<절대경로>\LazerSR.Hook.dll`을 설정한다. osu!의 .NET 8 런타임이 시작 시 이 DLL을 로드하고, global namespace의 `StartupHook.Initialize()`를 호출한다.
+Launcher는 osu!.exe를 직접 띄우지 않고 **우리 네이티브 호스트 `<app>\osuhost\osu!.exe`**(`LazerSR.OsuHost\`)를
+`osu!.exe <osu! 설치 폴더>`로 실행한다. 그 자식 프로세스에만 `DOTNET_STARTUP_HOOKS=<절대경로>\LazerSR.Hook.dll`을
+설정하는 건 전과 같다. 호스트가 osu! 설치 폴더의 osu!.dll을 osu! 자신의 런타임(.NET 10, self-contained)으로 띄우면,
+런타임이 이 DLL을 로드하고 global namespace의 `StartupHook.Initialize()`를 호출한다.
+
+### 왜 호스트가 필요한가
+
+osu! **2026.920.0-lazer**부터 `osu.Desktop.csproj`의 Release 빌드에 `StartupHookSupport=false`가 들어갔다
+(커밋 `8d73096964` "Disable startup hooks", PR 없음, 이유 설명 없음, `progress\2026-09-21.md`). 이 값이
+`osu!.runtimeconfig.json`에 `System.StartupHookProvider.IsSupported: false`로 구워지고, CoreCLR은 이 스위치가
+false면 `DOTNET_STARTUP_HOOKS`를 읽지도 않고 조용히 넘어간다 — 예외도 로그도 없이 Hook이 아예 안 뜬다.
+
+런타임 프로퍼티는 호스트가 런타임을 초기화할 때 바꿀 수 있다. `LazerSR.OsuHost\host.c`는 osu!.exe(표준
+.NET apphost)가 하는 일을 그대로 하되 그 스위치 하나만 메모리에서 true로 되돌린다:
+
+```
+LoadLibrary(<osu!>\hostfxr.dll)                          ← osu! 자신의 호스트 레이어
+hostfxr_initialize_for_dotnet_command_line([osu!.dll, 인자...], dotnet_root=<osu!>)
+hostfxr_set_runtime_property_value("System.StartupHookProvider.IsSupported", "true")
+hostfxr_run_app                                           ← osu!가 끝날 때까지 블록, 종료코드 그대로 반환
+```
+
+- **osu! 파일은 한 바이트도 안 바뀐다**(runtimeconfig.json도 읽기만). 프로퍼티는 이 프로세스 메모리에서만 바뀐다.
+- 진입 시점은 기존과 동일 — `Main` 이전, osu.Game 미로드(2026-09-21 실측). `Patcher.Apply`의 지연 발견(§3) 그대로 성립.
+- 호스트 이름이 `osu!.exe`인 이유: osu! 자신(`NVAPI.cs`의 드라이버 프로필)과 Discord·tosu 같은 외부 도구가
+  **실행 파일 이름으로** osu!를 식별한다. 폴더(`osuhost\`)로 런처 exe와 분리한다.
+- 호스트 PID = osu! 프로세스 PID라 `PipeClient(osuPid)`/종료 감지는 그대로 동작한다.
+- 매니페스트는 `osu\app.manifest` 복사본(`SquirrelAwareVersion`만 제거), 아이콘은 `osu.Desktop\lazer.ico`,
+  `/CETCOMPAT:NO`(osu!.exe와 동일), 정적 CRT(`/MT`, VC++ 재배포 불필요).
+- **실패는 전부 메시지 박스.** 관리 코드가 뜨기 전이라 `HookLog`로 남길 방법이 없다. 종료코드도 단계별로 다르다(1~7).
+- 빌드: `LazerSR.Launcher.csproj`의 `BuildOsuHost` 타깃이 `LazerSR.OsuHost\build.cmd`(vswhere → vcvars64 → `rc`/`cl`)를
+  돌린다. **로컬·CI 모두 MSVC C++ 도구가 필요**하다(GitHub `windows-latest`에는 기본 탑재).
+
+### 이 방식의 알려진 성질
+
+- **osu! ≥ 2026.920.0 전용.** Hook이 net10.0이라 .NET 8 시절 osu!(≤ 2026.804.2)의 런타임에는 로드되지 않는다.
+  호스트 자체는 스위치가 원래 true인 구버전에도 무해하다.
+- osu! 안에서 "재시작"(렌더러 변경, 저장소 이전 후)은 osu!가 `Velopack.UpdateExe.Start`로 처리한다 — 우리 호스트가
+  아니라 공식 경로라 재시작된 osu!에는 LazerSR이 안 붙는다(런처에서 다시 실행). 실측은 안 함.
+- 게임 내 자동 업데이트는 원래부터 `OSU_EXTERNAL_UPDATE_PROVIDER=1`로 꺼져 있다 — osu! 업데이트는 평소대로 osu!를 직접 실행해서 한다.
+- 대안으로 CoreCLR 프로파일러 API(IL 재작성) 주입이 제안됐지만, 네이티브 C++ 프로파일러 + ReJIT이 필요해 훨씬
+  무겁고 디버깅이 어려워 채택하지 않았다(2026-09-21).
 
 ```csharp
 public class StartupHook  // global namespace 필수
@@ -50,6 +91,11 @@ public class StartupHook  // global namespace 필수
 ## 4. 실제 존재하는 패치 (2026-07-17 기준, 코드로 직접 확인)
 
 과거 설계원칙 문서는 "정확히 2개, 전부 `Select.*`의 `LoadComplete`"라고 서술했으나 **틀렸다.** 실제로는 19개(2026-08-31 기준):
+
+> **2026-09-21 기준 `[HarmonyPatch]` 클래스는 31개**(아래 표 + 리더보드 3개·dan 수집·선곡 진입·sunny 정렬 7개 등, 각 섹션 참고).
+> osu! 2026.920.0-lazer 실제 바이너리에서 **31개 전부 적용됨**을 확인했다 — 호스트로 띄운 뒤 probe hook이 osu.Game을
+> 로드해 `Patcher`를 발동시키고 `Harmony.GetPatchInfo`로 클래스별 적용 여부를 조회(`Prepare()` false로 조용히
+> 빠진 것 0건). osu! 업데이트 때마다 같은 방식으로 재확인할 것 — `Prepare()` 가드 때문에 빠진 패치는 눈에 안 띈다.
 
 | 파일 | 타겟 | 방식 |
 |---|---|---|
@@ -302,9 +348,11 @@ MainMenu ─(플레이 서브메뉴 버튼)→ InfiniteTrainingScreen ─(시작
   LazerSR.SunnyCalculator.dll   ← 루즈 파일
   0Harmony.dll, MonoMod.*.dll, Mono.Cecil.*.dll ← 루즈 파일
   MinaCalc.dll                  ← 네이티브 MSD 라이브러리 (P/Invoke)
+  osuhost\osu!.exe              ← 네이티브 osu! 호스트 (§1, 2026-09-21)
 ```
 
-- `LazerSR.Hook.dll`은 SingleFile 번들에서 제외 (실제 파일 경로 필요).
+- `LazerSR.Hook.dll`은 SingleFile 번들에서 제외 (실제 파일 경로 필요). `osuhost\osu!.exe`도 런처가 경로로 실행하므로 제외.
+- 전 프로젝트 **net10.0**(런처는 net10.0-windows, self-contained) — osu!가 2026.920.0에서 .NET 10으로 올라갔다(2026-09-21).
 - HarmonyX/MonoMod/Mono.Cecil은 exe와 같은 폴더 (DependencyResolver가 거기서 resolve).
 - `osu*.dll/xml/pdb` 배포 금지.
 

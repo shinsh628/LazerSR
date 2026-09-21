@@ -56,7 +56,12 @@ gh workflow run build-installer.yml -f version=6.5.3 -f create_release=true --re
 dotnet publish "LazerSR.Launcher\LazerSR.Launcher.csproj" -c Release
 ```
 
-출력: `LazerSR.Launcher\bin\Release\net8.0-windows\win-x64\publish\`
+출력: `LazerSR.Launcher\bin\Release\net10.0-windows\win-x64\publish\`
+
+**필요한 도구 (2026-09-21~)**: .NET 10 SDK + **MSVC C++ 빌드 도구**(osu! 호스트 `LazerSR.OsuHost\build.cmd`용, `architecture.md` §1).
+이 PC의 .NET 10 SDK는 관리자 권한 없이 `%LocalAppData%\dotnet10`에 설치돼 있고 PATH에 없다 — 전체 경로로 부른다:
+`$env:DOTNET_ROOT="$env:LOCALAPPDATA\dotnet10"; & "$env:LOCALAPPDATA\dotnet10\dotnet.exe" publish ...`
+(`C:\Program Files\dotnet`에는 .NET 8 SDK만 있다.)
 
 1. `installer\LazerSRClean.iss` 2번째 줄 `MyAppVersion` 값을 올린다 (예: `4.1.0` → `4.2.0`) — **이 로컬 수정은 커밋해도 되고 안 해도 된다**, 어차피 1a 경로는 이 파일의 커밋된 값을 안 쓴다.
 2. Inno Setup Compiler(ISCC)로 컴파일 — 설치 위치: `C:\Users\shins\AppData\Local\Programs\Inno Setup 6\ISCC.exe` (PATH에 없음, 매번 전체 경로로 호출):

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
@@ -37,6 +37,25 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>
   </ItemGroup>
+
+  <!-- osu! host (native, LazerSR.OsuHost\) - replaces osu!.exe as the process that starts osu!.dll,
+       so DOTNET_STARTUP_HOOKS works again on osu! 2026.920.0+ (architecture.md §1). Loose file under osuhost\. -->
+  <PropertyGroup>
+    <OsuHostDir>$(MSBuildThisFileDirectory)..\LazerSR.OsuHost\</OsuHostDir>
+    <OsuHostExe>$(OsuHostDir)bin\osu!.exe</OsuHostExe>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="$(OsuHostExe)">
+      <Link>osuhost\osu!.exe</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+  <Target Name="BuildOsuHost" BeforeTargets="AssignTargetPaths"
+          Inputs="$(OsuHostDir)host.c;$(OsuHostDir)host.rc;$(OsuHostDir)app.manifest;$(OsuHostDir)build.cmd"
+          Outputs="$(OsuHostExe)">
+    <Exec Command="&quot;$(OsuHostDir)build.cmd&quot;" />
+  </Target>
 
   <Target Name="RemoveOsuAssembliesFromLauncherOutput" AfterTargets="ResolveReferences">
     <ItemGroup>
@@ -75,10 +94,12 @@
                    Or '%(ResolvedFileToPublish.Filename)' == 'onnxruntime_providers_shared')
                    And ('%(ResolvedFileToPublish.Extension)' == '.dll')" />
       <!-- The dan model + badge artwork must be real files on disk (Hook loads
-           them by path), so keep them out of the single-file bundle the same way. -->
+           them by path), so keep them out of the single-file bundle the same way.
+           Same for the osu! host exe, which the launcher starts by path. -->
       <_HookFiles Include="@(ResolvedFileToPublish)"
           Condition="'%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)' == 'dan_model.onnx'
-                   Or $([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').Replace('/','\').StartsWith('dans\'))" />
+                   Or $([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').Replace('/','\').StartsWith('dans\'))
+                   Or $([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').Replace('/','\').StartsWith('osuhost\'))" />
       <ResolvedFileToPublish Remove="@(_HookFiles)" />
       <ResolvedFileToPublish Include="@(_HookFiles)" ExcludeFromSingleFile="true" />
     </ItemGroup>
