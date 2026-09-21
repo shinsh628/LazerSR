@@ -353,6 +353,8 @@ MainMenu ─(플레이 서브메뉴 버튼)→ InfiniteTrainingScreen ─(시작
 
 - `LazerSR.Hook.dll`은 SingleFile 번들에서 제외 (실제 파일 경로 필요). `osuhost\osu!.exe`도 런처가 경로로 실행하므로 제외.
 - 전 프로젝트 **net10.0**(런처는 net10.0-windows, self-contained) — osu!가 2026.920.0에서 .NET 10으로 올라갔다(2026-09-21).
+- **런처 exe는 `CETCompat=false`** (osu! 호스트도 `/CETCOMPAT:NO`). .NET 9+는 apphost를 CET 호환으로 찍는데, v8.0.0이
+  PC방에서 런타임 초기화 도중 흔적 없이 죽었다(host trace가 `CoreCLR path` 직후 끊김, `Launch host` 미도달). osu!도 같은 이유로 끈다.
 - HarmonyX/MonoMod/Mono.Cecil은 exe와 같은 폴더 (DependencyResolver가 거기서 resolve).
 - `osu*.dll/xml/pdb` 배포 금지.
 
