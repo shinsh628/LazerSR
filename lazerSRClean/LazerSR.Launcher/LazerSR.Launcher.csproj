@@ -12,7 +12,7 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <!-- .NET 9+ marks the apphost CET-compatible by default. On some PCs (injected non-CET DLLs from
          security/management software) the process then dies inside runtime init with no trace at all
-         (v8.0.0 at a PC bang, 2026-09-21). osu! itself ships with CETCompat=false for the same reason. -->
+         (v8.0.0 at a PC bang, 2026-09-21). osu! also ships with CETCompat=false (reason not stated). -->
     <CETCompat>false</CETCompat>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
