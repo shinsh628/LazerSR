@@ -78,8 +78,8 @@ namespace osu.Game.Rulesets.Osu.Difficulty
             usingClassicSliderAccuracy = score.Mods.OfType<OsuModClassic>().Any(m => m.NoSliderHeadAccuracy.Value);
             usingScoreV2 = score.Mods.Any(m => m is ModScoreV2);
 
-            accuracy = score.Accuracy;
-            scoreMaxCombo = score.MaxCombo;
+            accuracy = Math.Clamp(score.Accuracy, 0, 1);
+            scoreMaxCombo = Math.Clamp(score.MaxCombo, 0, osuAttributes.MaxCombo);
             countGreat = score.Statistics.GetValueOrDefault(HitResult.Great);
             countOk = score.Statistics.GetValueOrDefault(HitResult.Ok);
             countMeh = score.Statistics.GetValueOrDefault(HitResult.Meh);
@@ -108,7 +108,7 @@ namespace osu.Game.Rulesets.Osu.Difficulty
             double comboBasedEstimatedMissCount = calculateComboBasedEstimatedMissCount(osuAttributes);
             double? scoreBasedEstimatedMissCount = null;
 
-            if (usingClassicSliderAccuracy && !usingScoreV2 && score.LegacyTotalScore != null)
+            if (usingClassicSliderAccuracy && !usingScoreV2 && score.LegacyTotalScore > 0)
             {
                 var legacyScoreMissCalculator = new OsuLegacyScoreMissCalculator(score, osuAttributes);
                 scoreBasedEstimatedMissCount = legacyScoreMissCalculator.Calculate();
@@ -123,6 +123,7 @@ namespace osu.Game.Rulesets.Osu.Difficulty
 
             effectiveMissCount = Math.Max(countMiss, effectiveMissCount);
             effectiveMissCount = Math.Min(totalHits, effectiveMissCount);
+            effectiveMissCount = Math.Max(0, effectiveMissCount);
 
             if (effectiveMissCount > 0)
             {
