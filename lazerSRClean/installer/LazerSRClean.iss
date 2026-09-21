@@ -1,5 +1,5 @@
 #define MyAppName "LazerSR"
-#define MyAppVersion "8.0.0"
+#define MyAppVersion "8.0.1"
 #define MyAppExeName "LazerSR.Launcher.exe"
 #define MyPublishDir "C:\dev\lazerSR\lazerSRClean\LazerSR.Launcher\bin\Release\net10.0-windows\win-x64\publish"
 
@@ -40,6 +40,9 @@ Name: "desktopicon"; Description: "바탕화면에 바로 가기 만들기"; Gro
 ; 메인 실행 파일 (SingleFile 번들, .NET 10 런타임 포함)
 Source: "{#MyPublishDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
+; 진단 실행 (.NET 호스트 트레이스 + launcher.log) — 런처가 무반응일 때 원인 수집용
+Source: "{#MyPublishDir}\diagnose.cmd"; DestDir: "{app}"; Flags: ignoreversion
+
 ; osu! 호스트 (네이티브) — osu!.exe 대신 osu!의 osu!.dll을 startup hook 허용 상태로 띄운다 (architecture.md §1)
 Source: "{#MyPublishDir}\osuhost\osu!.exe"; DestDir: "{app}\osuhost"; Flags: ignoreversion
 
@@ -75,6 +78,7 @@ Source: "{#MyPublishDir}\dans\*"; DestDir: "{app}\dans"; Flags: ignoreversion re
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\{#MyAppName} 진단 실행"; Filename: "{app}\diagnose.cmd"; WorkingDir: "{app}"
 Name: "{group}\{#MyAppName} 제거"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 

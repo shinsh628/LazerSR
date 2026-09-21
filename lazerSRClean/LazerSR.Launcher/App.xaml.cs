@@ -5,8 +5,12 @@ namespace LazerSR.Launcher;
 
 public partial class App : System.Windows.Application
 {
+    static App() => LaunchLog.Start();
+
     protected override async void OnStartup(StartupEventArgs e)
     {
+        LaunchLog.Write("OnStartup");
+        LaunchLog.AttachDispatcher(Dispatcher);
         base.OnStartup(e);
 
         // GUI가 뜨기 전에 업데이트를 검사한다. 아직 창이 없으므로 검사 도중 종료되지 않게 잡아둔다.
@@ -15,16 +19,27 @@ public partial class App : System.Windows.Application
         try
         {
             var update = await UpdateChecker.CheckAsync();
+            LaunchLog.Write($"update check: current={UpdateChecker.CurrentVersion} latest-newer={update?.Version.ToString() ?? "none"}");
             if (update != null && await PromptAndUpdateAsync(update))
                 return; // 업데이트 진행 — 인스톨러가 뜨고 프로세스는 종료됨
         }
-        catch
+        catch (Exception ex)
         {
             // 업데이트 경로에서 무슨 일이 있어도 런처는 평소대로 실행한다
+            LaunchLog.Write($"update path failed (ignored): {ex}");
         }
 
         ShutdownMode = ShutdownMode.OnLastWindowClose;
-        new MainWindow().Show();
+        LaunchLog.Write("creating MainWindow");
+        var window = new MainWindow();
+        window.Show();
+        LaunchLog.Write("MainWindow shown");
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        LaunchLog.Write($"exit code={e.ApplicationExitCode}");
+        base.OnExit(e);
     }
 
     private static async Task<bool> PromptAndUpdateAsync(UpdateInfo update)

@@ -13,7 +13,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- 로컬 폴백 빌드용 기본 버전. CI는 태그에서 /p:Version=... 로 덮어쓴다 (docs\end.md 참고). -->
-    <Version>8.0.0</Version>
+    <Version>8.0.1</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -33,6 +33,14 @@
     <!-- Dan badge artwork — loose under <appdir>/dans/, loaded by path (DanImages.cs). -->
     <None Include="..\LazerSR.Hook\Assets\dans\**\*">
       <Link>dans\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- Diagnostic launcher run (host trace) - see LaunchLog.cs. Loose file next to the exe. -->
+  <ItemGroup>
+    <None Include="diagnose.cmd">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>
@@ -98,6 +106,7 @@
            Same for the osu! host exe, which the launcher starts by path. -->
       <_HookFiles Include="@(ResolvedFileToPublish)"
           Condition="'%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)' == 'dan_model.onnx'
+                   Or '%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)' == 'diagnose.cmd'
                    Or $([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').Replace('/','\').StartsWith('dans\'))
                    Or $([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').Replace('/','\').StartsWith('osuhost\'))" />
       <ResolvedFileToPublish Remove="@(_HookFiles)" />
