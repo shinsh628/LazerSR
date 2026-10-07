@@ -1,0 +1,6 @@
+E4 feasible True score 11.6241 easy True
+ALT feasible True score 11.4128 easy False
+done 72 runs in 439s
+A top: [12.026, 12.024, 12.017, 12.013, 12.003] | easy top: [12.026, 11.918, 11.899]
+B top: [11.846, 11.822, 11.822, 11.815, 11.809] | easy top: [11.688, 11.393, 10.967]
+C top: [11.624, 11.413, 11.208, 11.097, 10.965] | easy top: [11.624, 10.698, 10.13]
